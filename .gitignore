@@ -5,6 +5,12 @@
 # Finder
 .DS_Store
 
+# 민감한 설정 파일 (서버 URL 등) - 절대 커밋 금지
+Configuration/Secrets.xcconfig
+
+# Claude 작업 디렉토리
+.claude/
+
 # Xcode - User files
 xcuserdata/
 

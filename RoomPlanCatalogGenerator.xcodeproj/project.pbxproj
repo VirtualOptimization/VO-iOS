@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */; };
+		070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
+		070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
 		C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92329F3703800930252 /* RoomPlanExporterApp.swift */; };
 		C427F92629F3703800930252 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92529F3703800930252 /* ContentView.swift */; };
 		C427F92829F3703800930252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92729F3703800930252 /* Assets.xcassets */; };
@@ -33,6 +36,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureViewController.swift; sourceTree = "<group>"; };
+		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
+		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
+		070B96AB2F86475100C0E62A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C427F92129F3703800930252 /* RoomPlanExporter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomPlanExporter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C427F92329F3703800930252 /* RoomPlanExporterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanExporterApp.swift; sourceTree = "<group>"; };
 		C427F92529F3703800930252 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -45,8 +52,8 @@
 		C48B87B529EE07A600D29743 /* URL+CatalogExtensions.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "URL+CatalogExtensions.swift"; sourceTree = "<group>"; };
 		C48B87BD29EE0AD300D29743 /* RoomPlan.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RoomPlan.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS17.0.sdk/System/Library/Frameworks/RoomPlan.framework; sourceTree = DEVELOPER_DIR; };
 		C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = RoomPlanCatalog.bundle; sourceTree = "<group>"; };
-		EF9D187789686CAA71B3CCA0 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; path = LICENSE.txt; sourceTree = "<group>"; };
-		F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */ = {isa = PBXFileReference; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
+		EF9D187789686CAA71B3CCA0 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
+		F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,11 +96,15 @@
 		C427F92229F3703800930252 /* RoomPlanExporter */ = {
 			isa = PBXGroup;
 			children = (
+				070B96AB2F86475100C0E62A /* Info.plist */,
 				C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */,
 				C427F92329F3703800930252 /* RoomPlanExporterApp.swift */,
 				C427F92529F3703800930252 /* ContentView.swift */,
 				C427F92729F3703800930252 /* Assets.xcassets */,
 				C427F92929F3703800930252 /* Preview Content */,
+				070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */,
+				070B96A72F86451700C0E62A /* RoomViewerView.swift */,
+				070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */,
 			);
 			path = RoomPlanExporter;
 			sourceTree = "<group>";
@@ -248,6 +259,9 @@
 			files = (
 				C499B2AF29F3743100E99C6C /* RoomPlanCatalog.swift in Sources */,
 				C427F92629F3703800930252 /* ContentView.swift in Sources */,
+				070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */,
+				070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */,
+				070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */,
 				C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -274,10 +288,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"RoomPlanExporter/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -312,10 +329,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"RoomPlanExporter/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -470,9 +490,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.apple-samplecode.CatalogGenerator${SAMPLE_CODE_DISAMBIGUATOR}";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -483,7 +504,7 @@
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 6;
+				TARGETED_DEVICE_FAMILY = "1,6";
 			};
 			name = Debug;
 		};
@@ -494,9 +515,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.apple-samplecode.CatalogGenerator${SAMPLE_CODE_DISAMBIGUATOR}";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -506,7 +528,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 6;
+				TARGETED_DEVICE_FAMILY = "1,6";
 			};
 			name = Release;
 		};
