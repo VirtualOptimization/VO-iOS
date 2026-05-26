@@ -1,0 +1,27 @@
+# See LICENSE folder for this sample’s licensing information.
+#
+# Apple sample code gitignore configuration.
+
+# Finder
+.DS_Store
+
+# 민감한 설정 파일 (서버 URL 등) - 절대 커밋 금지
+Configuration/Secrets.xcconfig
+
+# Claude 작업 디렉토리
+.claude/
+
+# Xcode - User files
+xcuserdata/
+
+**/*.xcodeproj/project.xcworkspace/*
+!**/*.xcodeproj/project.xcworkspace/xcshareddata
+
+**/*.xcodeproj/project.xcworkspace/xcshareddata/*
+!**/*.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+
+**/*.playground/playground.xcworkspace/*
+!**/*.playground/playground.xcworkspace/xcshareddata
+
+**/*.playground/playground.xcworkspace/xcshareddata/*
+!**/*.playground/playground.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
