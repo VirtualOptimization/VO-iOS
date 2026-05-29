@@ -10,6 +10,18 @@
 		070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */; };
 		070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
 		070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
+		AB01000000000000AB010000 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01000000000000AB010001 /* ScanViewModel.swift */; };
+		AB02000000000000AB020000 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB02000000000000AB020001 /* MainView.swift */; };
+		AB03000000000000AB030000 /* ScanGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB03000000000000AB030001 /* ScanGuideView.swift */; };
+		AB04000000000000AB040000 /* CountdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB04000000000000AB040001 /* CountdownView.swift */; };
+		AB05000000000000AB050000 /* ScanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB05000000000000AB050001 /* ScanningView.swift */; };
+		AB06000000000000AB060000 /* RoomResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB06000000000000AB060001 /* RoomResultView.swift */; };
+		AB07000000000000AB070000 /* VOButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB07000000000000AB070001 /* VOButtonStyles.swift */; };
+		AB08000000000000AB080000 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB08000000000000AB080001 /* LoadingView.swift */; };
+		AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB09000000000000AB090001 /* UploadCompleteView.swift */; };
+		AB10000000000000AB100000 /* OptimizedResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB10000000000000AB100001 /* OptimizedResultView.swift */; };
+		AB11000000000000AB110000 /* InquiryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB11000000000000AB110001 /* InquiryView.swift */; };
+		AB12000000000000AB120000 /* InquiryResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12000000000000AB120001 /* InquiryResultView.swift */; };
 		C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92329F3703800930252 /* RoomPlanExporterApp.swift */; };
 		C427F92629F3703800930252 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92529F3703800930252 /* ContentView.swift */; };
 		C427F92829F3703800930252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92729F3703800930252 /* Assets.xcassets */; };
@@ -39,6 +51,18 @@
 		070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureViewController.swift; sourceTree = "<group>"; };
 		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
 		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
+		AB01000000000000AB010001 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
+		AB02000000000000AB020001 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		AB03000000000000AB030001 /* ScanGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanGuideView.swift; sourceTree = "<group>"; };
+		AB04000000000000AB040001 /* CountdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownView.swift; sourceTree = "<group>"; };
+		AB05000000000000AB050001 /* ScanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanningView.swift; sourceTree = "<group>"; };
+		AB06000000000000AB060001 /* RoomResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomResultView.swift; sourceTree = "<group>"; };
+		AB07000000000000AB070001 /* VOButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VOButtonStyles.swift; sourceTree = "<group>"; };
+		AB08000000000000AB080001 /* LoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingView.swift; sourceTree = "<group>"; };
+		AB09000000000000AB090001 /* UploadCompleteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadCompleteView.swift; sourceTree = "<group>"; };
+		AB10000000000000AB100001 /* OptimizedResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptimizedResultView.swift; sourceTree = "<group>"; };
+		AB11000000000000AB110001 /* InquiryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryView.swift; sourceTree = "<group>"; };
+		AB12000000000000AB120001 /* InquiryResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryResultView.swift; sourceTree = "<group>"; };
 		070B96AB2F86475100C0E62A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C427F92129F3703800930252 /* RoomPlanExporter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomPlanExporter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C427F92329F3703800930252 /* RoomPlanExporterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanExporterApp.swift; sourceTree = "<group>"; };
@@ -93,18 +117,62 @@
 			name = Configuration;
 			sourceTree = "<group>";
 		};
+		AB21000000000000AB210000 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C427F92529F3703800930252 /* ContentView.swift */,
+				070B96A72F86451700C0E62A /* RoomViewerView.swift */,
+				AB02000000000000AB020001 /* MainView.swift */,
+				AB03000000000000AB030001 /* ScanGuideView.swift */,
+				AB04000000000000AB040001 /* CountdownView.swift */,
+				AB05000000000000AB050001 /* ScanningView.swift */,
+				AB06000000000000AB060001 /* RoomResultView.swift */,
+				AB07000000000000AB070001 /* VOButtonStyles.swift */,
+				AB08000000000000AB080001 /* LoadingView.swift */,
+				AB09000000000000AB090001 /* UploadCompleteView.swift */,
+				AB10000000000000AB100001 /* OptimizedResultView.swift */,
+				AB11000000000000AB110001 /* InquiryView.swift */,
+				AB12000000000000AB120001 /* InquiryResultView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		AB22000000000000AB220000 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				AB01000000000000AB010001 /* ScanViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		AB23000000000000AB230000 /* Controllers */ = {
+			isa = PBXGroup;
+			children = (
+				070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */,
+			);
+			path = Controllers;
+			sourceTree = "<group>";
+		};
+		AB24000000000000AB240000 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 		C427F92229F3703800930252 /* RoomPlanExporter */ = {
 			isa = PBXGroup;
 			children = (
 				070B96AB2F86475100C0E62A /* Info.plist */,
 				C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */,
 				C427F92329F3703800930252 /* RoomPlanExporterApp.swift */,
-				C427F92529F3703800930252 /* ContentView.swift */,
 				C427F92729F3703800930252 /* Assets.xcassets */,
 				C427F92929F3703800930252 /* Preview Content */,
-				070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */,
-				070B96A72F86451700C0E62A /* RoomViewerView.swift */,
-				070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */,
+				AB21000000000000AB210000 /* Views */,
+				AB22000000000000AB220000 /* ViewModels */,
+				AB23000000000000AB230000 /* Controllers */,
+				AB24000000000000AB240000 /* Services */,
 			);
 			path = RoomPlanExporter;
 			sourceTree = "<group>";
@@ -263,6 +331,18 @@
 				070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */,
 				070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */,
 				C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */,
+				AB01000000000000AB010000 /* ScanViewModel.swift in Sources */,
+				AB02000000000000AB020000 /* MainView.swift in Sources */,
+				AB03000000000000AB030000 /* ScanGuideView.swift in Sources */,
+				AB04000000000000AB040000 /* CountdownView.swift in Sources */,
+				AB05000000000000AB050000 /* ScanningView.swift in Sources */,
+				AB06000000000000AB060000 /* RoomResultView.swift in Sources */,
+				AB07000000000000AB070000 /* VOButtonStyles.swift in Sources */,
+				AB08000000000000AB080000 /* LoadingView.swift in Sources */,
+				AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */,
+				AB10000000000000AB100000 /* OptimizedResultView.swift in Sources */,
+				AB11000000000000AB110000 /* InquiryView.swift in Sources */,
+				AB12000000000000AB120000 /* InquiryResultView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
