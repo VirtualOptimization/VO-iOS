@@ -89,20 +89,13 @@ final class ScanViewModel: ObservableObject {
                     print("☁️ [3/5] 업로드 완료 \(slot.logicalName) (\(data.count) bytes)")
                 }
 
-                // 4. complete → origin 버전 확정 (pipeline은 사용자가 버튼으로 직접 요청)
-                print("✅ [4/5] complete 호출 – confirmCode=\(confirmCode)")
-                let completeResp = try await optimizer.completeScanUpload(
-                    confirmCode: confirmCode,
-                    uploadedKeys: uploadedKeys
-                )
-                print("✅ [4/5] complete 완료 – pipelineStarted=\(completeResp.pipelineStarted) (최적화는 버튼으로 요청)")
-
-                // 최적화 버튼을 위해 키 보관
+                // 4. S3 업로드 완료 – /complete는 최적화 요청 버튼에서 한 번만 호출
+                // 키 보관 (requestOptimization에서 사용)
                 pendingConfirmCode   = confirmCode
                 pendingUploadedKeys  = uploadedKeys
 
                 // 5. UploadCompleteView로 이동 (확인 코드 표시 + 최적화 버튼 제공)
-                print("🎉 [5/5] 업로드 완료 → UploadCompleteView")
+                print("🎉 [4/5] 업로드 완료 → UploadCompleteView")
                 phase = .uploadComplete(room, confirmCode: confirmCode)
 
             } catch {
@@ -132,15 +125,21 @@ final class ScanViewModel: ObservableObject {
         return try Data(contentsOf: fileURL)
     }
 
-    /// /versions 폴링 → "optimized" 버전이 나타나면 완료 (5초 간격, 최대 5분)
+    /// GET /rooms/{code}/optimized 폴링 → data_url(normalized.json) 나오면 바로 완료 (5초 간격, 최대 10분)
     private func pollUntilComplete(confirmCode: String) async throws {
-        for attempt in 1...60 {
+        for attempt in 1...120 {
             try await Task.sleep(for: .seconds(5))
-            let detail = try await optimizer.fetchRoomVersions(confirmCode: confirmCode)
-            print("⏳ 폴링 \(attempt)/60 – 버전: \(detail.versions.map(\.versionType))")
-            if detail.versions.contains(where: { $0.versionType == "optimized" }) {
-                return  // optimized 버전 등장 → 완료
+            do {
+                let detail = try await optimizer.fetchVersionDetail(
+                    confirmCode: confirmCode, versionType: "optimized")
+                if detail.dataUrl != nil {
+                    print("✅ 폴링 \(attempt)/120 – normalized.json 확인됨, GLB 안 기다리고 진행")
+                    return
+                }
+            } catch {
+                // 아직 없음 – 계속 폴링
             }
+            print("⏳ 폴링 \(attempt)/120 – optimized 아직 없음")
         }
         throw OptimizerError.timeout
     }
@@ -305,9 +304,10 @@ final class ScanViewModel: ObservableObject {
             coordinateSystem: "RoomPlan (Y-up, meters, floor Y≈\(String(format: "%.2f", floorY))",
             objectCount:      objects.count,
             objects:          objects,
-            walls:            room.walls.map  { surfaceData($0) },
-            floors:           room.floors.map { surfaceData($0) },
-            doors:            room.doors.map  { surfaceData($0) }
+            walls:            room.walls.map   { surfaceData($0) },
+            floors:           room.floors.map  { surfaceData($0) },
+            doors:            room.doors.map   { surfaceData($0) },
+            windows:          room.windows.map { surfaceData($0) }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -365,5 +365,5 @@ private struct RoomPayload: Encodable {
     let scannedAt, coordinateSystem: String
     let objectCount: Int
     let objects: [FurnitureData]
-    let walls, floors, doors: [SurfaceData]
+    let walls, floors, doors, windows: [SurfaceData]
 }

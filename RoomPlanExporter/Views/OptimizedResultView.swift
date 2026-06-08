@@ -1,5 +1,6 @@
 import SwiftUI
 import RoomPlan
+import simd
 
 struct OptimizedResultView: View {
     let room: CapturedRoom
@@ -7,6 +8,20 @@ struct OptimizedResultView: View {
     @ObservedObject var vm: ScanViewModel
 
     @State private var showOptimized = true
+
+    /// 원본 방 가구를 OptimizedObject 형태로 변환 (최적화 뷰와 동일한 렌더러 사용)
+    private var originalObjects: [OptimizedObject] {
+        room.objects.compactMap { obj in
+            OptimizedObject(
+                identifier: obj.identifier,
+                category:   String(describing: obj.category),
+                center:     SIMD3(obj.transform.columns.3.x,
+                                  obj.transform.columns.3.y,
+                                  obj.transform.columns.3.z),
+                rotation:   simd_quatf(obj.transform)
+            )
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,7 +46,7 @@ struct OptimizedResultView: View {
                     if showOptimized {
                         RoomViewerView(capturedRoom: room, optimizedObjects: objects)
                     } else {
-                        RoomViewerView(capturedRoom: room)
+                        RoomViewerView(capturedRoom: room, optimizedObjects: originalObjects)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

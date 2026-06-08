@@ -164,6 +164,12 @@ struct RealityKitRoomView: UIViewRepresentable {
         do {
             let entity = try Entity.loadSync(contentsOf: url)
             anchor.addChild(entity)
+            // Apple USDZ의 바닥 재질이 흰색이므로 베이지 바닥으로 덮기
+            for s in capturedRoom.floors {
+                anchor.addChild(makeSurface(s,
+                    color: UIColor(red: 0.91, green: 0.87, blue: 0.80, alpha: 1.0),
+                    depth: 0.025))
+            }
             print("✅ USDZ 로드 완료")
         } catch {
             print("❌ USDZ 로드 실패: \(error) → renderScene 폴백")

@@ -124,7 +124,9 @@ struct InquiryResultView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         case .loaded(let versionDetail):
-            FurnitureRealityKitView(detail: versionDetail).ignoresSafeArea()
+            FurnitureRealityKitView(detail: versionDetail)
+                .id(versionDetail.dataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")
+                .ignoresSafeArea()
         case .error:
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")

@@ -201,7 +201,7 @@ struct RoomDataPayload: Codable {
 
 actor RoomOptimizerService {
 
-    private let apiBase  = "http://172.28.26.70:8000/api"
+    private let apiBase  = "http://172.20.14.241:8000/api"
     private var roomsBase: String { "\(apiBase)/rooms" }
 
     // MARK: 📤 업로드 세션 시작
@@ -248,20 +248,32 @@ actor RoomOptimizerService {
 
     func completeScanUpload(confirmCode: String,
                             uploadedKeys: [String]) async throws -> CompleteUploadResponse {
-        // POST /api/rooms/{confirm_code}/complete
+        // POST /api/rooms/{confirm_code}/complete  (stale-connection 대비 최대 3회 재시도)
         let url = URL(string: "\(roomsBase)/\(confirmCode)/complete")!
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys))
-        req.timeoutInterval = 30
+        let body = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys))
 
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            print("❌ complete 응답: \(String(data: data, encoding: .utf8) ?? "")")
-            throw OptimizerError.serverError
+        var lastError: Error = OptimizerError.serverError
+        for attempt in 1...3 {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = body
+            req.timeoutInterval = 30
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    print("❌ complete 응답: \(String(data: data, encoding: .utf8) ?? "")")
+                    throw OptimizerError.serverError
+                }
+                return try JSONDecoder().decode(CompleteUploadResponse.self, from: data)
+            } catch let err as NSError where err.code == NSURLErrorNetworkConnectionLost && attempt < 3 {
+                print("⚠️ complete 연결 끊김 (\(attempt)/3) – 재시도")
+                lastError = err
+                try await Task.sleep(for: .seconds(1))
+            }
         }
-        return try JSONDecoder().decode(CompleteUploadResponse.self, from: data)
+        throw lastError
     }
 
     // MARK: 🔍 룸 상태 조회 (최적화 완료 폴링)
