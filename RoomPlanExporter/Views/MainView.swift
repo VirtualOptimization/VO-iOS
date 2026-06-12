@@ -7,28 +7,29 @@ struct MainView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 20) {
+            VStack(spacing: 8) {
                 Text("보는 것을 넘어, 최적을 찾다")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.semiBold14)
+                    .foregroundStyle(.gray)
 
                 Image("logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 200)
+                    .frame(width: 250)
+                    .padding(.top, -60)
             }
 
-            Spacer()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 18) {
                 Button("공간 촬영") { vm.showGuide() }
                     .buttonStyle(VOOutlineButtonStyle())
 
                 Button("결과 조회") { vm.showInquiry() }
                     .buttonStyle(VOFilledButtonStyle())
             }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 52)
+            .padding(.horizontal, 50)
+            
+            Spacer()
         }
     }
 }

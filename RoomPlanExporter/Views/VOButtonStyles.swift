@@ -1,13 +1,9 @@
 import SwiftUI
 
-extension Color {
-    static let voBlue = Color(red: 0.60, green: 0.75, blue: 0.90)
-}
-
 struct VOFilledButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(.semiBold14)
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -19,7 +15,7 @@ struct VOFilledButtonStyle: ButtonStyle {
 struct VOOutlineButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(.semiBold14)
             .foregroundStyle(Color.voBlue)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)

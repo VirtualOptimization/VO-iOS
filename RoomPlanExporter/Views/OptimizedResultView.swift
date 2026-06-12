@@ -1,116 +1,104 @@
 import SwiftUI
 import RoomPlan
-import simd
 
 struct OptimizedResultView: View {
     let room: CapturedRoom
-    let objects: [OptimizedObject]
+    let versionDetail: RoomVersionDetail
     @ObservedObject var vm: ScanViewModel
 
     @State private var showOptimized = true
-
-    /// 원본 방 가구를 OptimizedObject 형태로 변환 (최적화 뷰와 동일한 렌더러 사용)
-    private var originalObjects: [OptimizedObject] {
-        room.objects.compactMap { obj in
-            OptimizedObject(
-                identifier: obj.identifier,
-                category:   String(describing: obj.category),
-                center:     SIMD3(obj.transform.columns.3.x,
-                                  obj.transform.columns.3.y,
-                                  obj.transform.columns.3.z),
-                rotation:   simd_quatf(obj.transform)
-            )
-        }
-    }
+    @State private var isTransparent = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // 배너
+            // ── 배너 ─────────────────────────────────────────────────────────
             HStack(spacing: 10) {
                 Image("logo_white")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 20)
+                    .resizable().scaledToFit().frame(height: 32)
                 Text("최적화 완료 !")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 20)
+            .padding(.vertical, 12).padding(.horizontal, 20)
             .background(Color.voBlue)
 
-            // 3D 뷰어 + 통계 뱃지
-            ZStack(alignment: .topTrailing) {
-                Group {
-                    if showOptimized {
-                        RoomViewerView(capturedRoom: room, optimizedObjects: objects)
-                    } else {
-                        RoomViewerView(capturedRoom: room, optimizedObjects: originalObjects)
-                    }
+            // ── 3D 뷰어 ──────────────────────────────────────────────────────
+            Group {
+                if showOptimized {
+                    FurnitureRealityKitView(detail: versionDetail, capturedRoom: room, isTransparent: isTransparent)
+                } else {
+                    RoomViewerView(capturedRoom: room, isTransparent: isTransparent)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(.easeInOut(duration: 0.3), value: showOptimized)
-
-                // 바닥 점유율 뱃지 (UI placeholder)
-                FloorStatsBadge(isOptimized: showOptimized)
-                    .padding(.top, 12)
-                    .padding(.trailing, 16)
+            }
+            .id("\(showOptimized)-\(isTransparent)")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                RoomStyleToggle(isTransparent: $isTransparent)
+                    .padding(12)
             }
 
-            // 하단 컨트롤
-            VStack(spacing: 14) {
-                HStack(spacing: 4) {
-                    Image(systemName: "info.circle")
-                        .font(.caption)
-                    Text("모든 버전은 저장되어 있으니 자유롭게 확인해보세요")
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
+            Divider()
 
-                HStack(spacing: 12) {
-                    if showOptimized {
-                        Button("최적화") { withAnimation { showOptimized = true } }
-                            .buttonStyle(VOFilledButtonStyle())
-                        Button("내 방") { withAnimation { showOptimized = false } }
-                            .buttonStyle(VOOutlineButtonStyle())
-                    } else {
-                        Button("최적화") { withAnimation { showOptimized = true } }
-                            .buttonStyle(VOOutlineButtonStyle())
-                        Button("내 방") { withAnimation { showOptimized = false } }
-                            .buttonStyle(VOFilledButtonStyle())
-                    }
+            // ── 버전 전환 버튼 (가로 2개) ─────────────────────────────────────
+            HStack(spacing: 12) {
+                if showOptimized {
+                    Button("최적화") { withAnimation(.easeInOut(duration: 0.2)) { showOptimized = true } }
+                        .buttonStyle(VOFilledButtonStyle())
+                    Button("내 방") { withAnimation(.easeInOut(duration: 0.2)) { showOptimized = false } }
+                        .buttonStyle(VOOutlineButtonStyle())
+                } else {
+                    Button("최적화") { withAnimation(.easeInOut(duration: 0.2)) { showOptimized = true } }
+                        .buttonStyle(VOOutlineButtonStyle())
+                    Button("내 방") { withAnimation(.easeInOut(duration: 0.2)) { showOptimized = false } }
+                        .buttonStyle(VOFilledButtonStyle())
                 }
-                .padding(.horizontal, 40)
-
-                Button("메인으로 돌아가기") { vm.retake() }
-                    .buttonStyle(VOOutlineButtonStyle())
-                    .padding(.horizontal, 40)
             }
-            .padding(.vertical, 20)
+            .padding(.horizontal, 50)
+            .padding(.top, 16)
+
+            // ── 메인으로 ─────────────────────────────────────────────────────
+            Button("메인으로") { vm.retake() }
+                .buttonStyle(VOOutlineButtonStyle())
+                .padding(.horizontal, 50)
+                .padding(.vertical, 12)
         }
     }
 }
 
-// MARK: - 바닥 점유율 뱃지 (UI only)
+// MARK: - 벽 스타일 토글 버튼 (흰색 / 투명)
 
-struct FloorStatsBadge: View {
-    let isOptimized: Bool
+struct RoomStyleToggle: View {
+    @Binding var isTransparent: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Image(systemName: "mappin.circle.fill")
-                    .foregroundStyle(.red)
-                Text("바닥 점유율 \(isOptimized ? 72 : 54)%")
-                    .font(.caption.bold())
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isTransparent = false }
+            } label: {
+                Text("흰색")
+                    .font(.caption.weight(isTransparent ? .regular : .semibold))
+                    .foregroundStyle(isTransparent ? Color.secondary : Color.voBlue)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(isTransparent ? Color.clear : Color.voBlue.opacity(0.13))
             }
-            Text(isOptimized ? "최적화 대비 +18%" : "기존 내 방 대비 -18%")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+
+            Divider()
+                .frame(height: 18)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isTransparent = true }
+            } label: {
+                Text("투명")
+                    .font(.caption.weight(isTransparent ? .semibold : .regular))
+                    .foregroundStyle(isTransparent ? Color.voBlue : Color.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(isTransparent ? Color.voBlue.opacity(0.13) : Color.clear)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.voBlue.opacity(0.25), lineWidth: 1))
     }
 }

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -24,7 +24,6 @@
 		AB12000000000000AB120000 /* InquiryResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12000000000000AB120001 /* InquiryResultView.swift */; };
 		C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92329F3703800930252 /* RoomPlanExporterApp.swift */; };
 		C427F92629F3703800930252 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92529F3703800930252 /* ContentView.swift */; };
-		C427F92829F3703800930252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92729F3703800930252 /* Assets.xcassets */; };
 		C427F92B29F3703800930252 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92A29F3703800930252 /* Preview Assets.xcassets */; };
 		C48B87B629EE07A600D29743 /* RoomPlanCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48B87B329EE07A600D29743 /* RoomPlanCatalog.swift */; };
 		C48B87B729EE07A600D29743 /* RoomPlanCatalogGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48B87B429EE07A600D29743 /* RoomPlanCatalogGenerator.swift */; };
@@ -51,6 +50,7 @@
 		070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureViewController.swift; sourceTree = "<group>"; };
 		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
 		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
+		070B96AB2F86475100C0E62A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AB01000000000000AB010001 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
 		AB02000000000000AB020001 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		AB03000000000000AB030001 /* ScanGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanGuideView.swift; sourceTree = "<group>"; };
@@ -63,11 +63,9 @@
 		AB10000000000000AB100001 /* OptimizedResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptimizedResultView.swift; sourceTree = "<group>"; };
 		AB11000000000000AB110001 /* InquiryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryView.swift; sourceTree = "<group>"; };
 		AB12000000000000AB120001 /* InquiryResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryResultView.swift; sourceTree = "<group>"; };
-		070B96AB2F86475100C0E62A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C427F92129F3703800930252 /* RoomPlanExporter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomPlanExporter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C427F92329F3703800930252 /* RoomPlanExporterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanExporterApp.swift; sourceTree = "<group>"; };
 		C427F92529F3703800930252 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		C427F92729F3703800930252 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C427F92A29F3703800930252 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		C47199DE2A05D856007C3501 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		C48B87A929EE075100D29743 /* RoomPlanCatalogGenerator */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = RoomPlanCatalogGenerator; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -79,6 +77,10 @@
 		EF9D187789686CAA71B3CCA0 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
 		F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		0707F8022FD98F3E000A5749 /* Resources */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Resources; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C427F91E29F3703800930252 /* Frameworks */ = {
@@ -164,10 +166,10 @@
 		C427F92229F3703800930252 /* RoomPlanExporter */ = {
 			isa = PBXGroup;
 			children = (
+				0707F8022FD98F3E000A5749 /* Resources */,
 				070B96AB2F86475100C0E62A /* Info.plist */,
 				C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */,
 				C427F92329F3703800930252 /* RoomPlanExporterApp.swift */,
-				C427F92729F3703800930252 /* Assets.xcassets */,
 				C427F92929F3703800930252 /* Preview Content */,
 				AB21000000000000AB210000 /* Views */,
 				AB22000000000000AB220000 /* ViewModels */,
@@ -239,6 +241,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0707F8022FD98F3E000A5749 /* Resources */,
 			);
 			name = RoomPlanExporter;
 			productName = RoomPlanExporter;
@@ -314,7 +319,6 @@
 			files = (
 				C427F92B29F3703800930252 /* Preview Assets.xcassets in Resources */,
 				C499B2B129F375A000E99C6C /* RoomPlanCatalog.bundle in Resources */,
-				C427F92829F3703800930252 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -371,7 +375,7 @@
 				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";
@@ -412,7 +416,7 @@
 				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";

@@ -6,12 +6,10 @@ import simd
 
 /// POST /rooms/start 요청
 private struct StartScanRequest: Encodable {
-    let modelFilenames:      [String]
     let includeRoomUsdz:     Bool
     let includeRoomEmptyUsdz: Bool
 
     enum CodingKeys: String, CodingKey {
-        case modelFilenames       = "model_filenames"
         case includeRoomUsdz      = "include_room_usdz"
         case includeRoomEmptyUsdz = "include_room_empty_usdz"
     }
@@ -141,16 +139,21 @@ struct ScanDetail: Codable {
 }
 
 /// GET /api/rooms/{confirm_code}/origin|optimized 응답
-/// 실제 서버: usdz_url / data_url / model_urls 세 필드만 반환
 struct RoomVersionDetail: Codable {
-    let usdzUrl:   String?             // Room.usdz presigned URL
-    let dataUrl:   String?             // room_data.json presigned URL
-    let modelUrls: [String: String]?   // 모델별 URL 딕셔너리 (현재 {})
+    let usdzUrl:      String?             // Room.usdz presigned URL (가구 포함 원본)
+    let usdzEmptyUrl: String?             // Room_empty.usdz presigned URL (가구 없는 방 구조만, B안용)
+    let glbUrl:       String?             // output.glb presigned URL (Unity용)
+    let dataUrl:      String?             // room_data.roomplan_optimized.json (RoomPlan 좌표계, iOS용)
+    let unityDataUrl: String?             // room_data.roomplan_optimized.unity.json (Unity 좌표계) — nullable
+    let modelUrls:    [String: String]?   // 카탈로그 모델 URL (key = modelFileName)
 
     enum CodingKeys: String, CodingKey {
-        case usdzUrl   = "usdz_url"
-        case dataUrl   = "data_url"
-        case modelUrls = "model_urls"
+        case usdzUrl      = "usdz_url"
+        case usdzEmptyUrl = "usdz_empty_url"
+        case glbUrl       = "glb_url"
+        case dataUrl      = "data_url"
+        case unityDataUrl = "unity_data_url"
+        case modelUrls    = "model_urls"
     }
 }
 
@@ -160,6 +163,7 @@ struct RoomDataPayload: Codable {
     let walls:   [RoomSurface]?
     let floors:  [RoomSurface]?
     let doors:   [RoomSurface]?
+    let windows: [RoomSurface]?
 
     struct RoomObject: Codable {
         let identifier:    String
@@ -201,21 +205,20 @@ struct RoomDataPayload: Codable {
 
 actor RoomOptimizerService {
 
-    private let apiBase  = "http://172.20.14.241:8000/api"
+    private let apiBase  = "http://43.201.10.153:8000/api"
     private var roomsBase: String { "\(apiBase)/rooms" }
 
     // MARK: 📤 업로드 세션 시작
 
-    func startScanUpload(modelFilenames: [String],
-                         includeRoomUsdz: Bool = true) async throws -> StartScanResponse {
+    func startScanUpload(includeRoomUsdz: Bool = true,
+                         includeRoomEmptyUsdz: Bool = false) async throws -> StartScanResponse {
         let url = URL(string: "\(roomsBase)/start")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(
-            StartScanRequest(modelFilenames: modelFilenames,
-                             includeRoomUsdz: includeRoomUsdz,
-                             includeRoomEmptyUsdz: false)
+            StartScanRequest(includeRoomUsdz: includeRoomUsdz,
+                             includeRoomEmptyUsdz: includeRoomEmptyUsdz)
         )
         req.timeoutInterval = 30
 

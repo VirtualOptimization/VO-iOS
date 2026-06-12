@@ -18,35 +18,32 @@ struct ScanGuideView: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { vm.phase = .main } label: {
                 Image(systemName: "chevron.left")
-                    .font(.title3.weight(.semibold))
+                    .font(.semiBold20)
                     .foregroundStyle(.primary)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, 30)
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
             }
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("공간 촬영 및 분석 🔥\n이용 안내")
+                        Text("공간 촬영 및 분석 📷\n이용 안내")
                             .font(.title2.bold())
-                        Text("원활하고 정확한 공간 촬영을 위해 확인해주세요 !")
+                        Text("원활하고 정확한 공간 촬영을 위해 확인해주세요!")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 32)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 45)
 
                     VStack(spacing: 0) {
                         ForEach(Array(tips.enumerated()), id: \.offset) { i, tip in
-                            TipRow(
-                                number: i + 1,
-                                title: tip.0,
-                                detail: tip.1,
-                                showConnector: i < tips.count - 1
-                            )
+                            TipRow(number: i + 1, title: tip.0, detail: tip.1,
+                                   showConnector: i < tips.count - 1)
                         }
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 40)
                 }
                 .padding(.bottom, 16)
             }
@@ -67,25 +64,30 @@ private struct TipRow: View {
     let showConnector: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 20) {
             VStack(spacing: 0) {
                 Circle()
-                    .fill(.black)
+                    .fill(Color.voBlue)
                     .frame(width: 28, height: 28)
                     .overlay(
                         Text("\(number)")
                             .font(.caption.bold())
                             .foregroundStyle(.white)
                     )
+
                 if showConnector {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.25))
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
-                        .padding(.vertical, 4)
+                    Canvas { ctx, size in
+                        var path = Path()
+                        path.move(to: CGPoint(x: size.width / 2, y: 0))
+                        path.addLine(to: CGPoint(x: size.width / 2, y: size.height))
+                        ctx.stroke(path, with: .color(.gray.opacity(0.4)),
+                                   style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    }
+                    .frame(width: 28, height: 44)
+                    .padding(.top, 4)
                 }
             }
-            .frame(width: 28)
+            .frame(width: 28, alignment: .top)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
@@ -94,12 +96,10 @@ private struct TipRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if showConnector {
-                    Spacer().frame(height: 20)
-                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, showConnector ? 16 : 0)
         }
-        .frame(minHeight: 80, alignment: .top)
     }
 }
 

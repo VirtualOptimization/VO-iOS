@@ -15,7 +15,7 @@ struct UploadCompleteView: View {
                 Image("logo_white")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 20)
+                    .frame(height: 32)
                 Text("내 방 저장 및 확인 코드 생성 완료 !")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white)
@@ -31,6 +31,7 @@ struct UploadCompleteView: View {
                     Text(confirmCode)
                         .font(.title2.bold())
                         .tracking(4)
+                        .foregroundStyle(Color.voBlue)
 
                     Button {
                         UIPasteboard.general.string = confirmCode
@@ -40,8 +41,9 @@ struct UploadCompleteView: View {
                             copied = false
                         }
                     } label: {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .foregroundStyle(copied ? .green : .secondary)
+                        Image(systemName: copied ? "checkmark" : "square.on.square")
+                            .font(.system(size: 16))
+                            .foregroundStyle(copied ? .green : Color.voBlue)
                             .animation(.easeInOut(duration: 0.2), value: copied)
                     }
                 }
@@ -63,17 +65,16 @@ struct UploadCompleteView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // 하단 버튼
-            VStack(spacing: 10) {
-                Button("최적화 요청") {
+            VStack(spacing: 12) {
+                Button("최적화 하기") {
                     vm.requestOptimization(room: room, confirmCode: confirmCode)
                 }
                 .buttonStyle(VOFilledButtonStyle())
-                .padding(.horizontal, 40)
 
                 Button("메인으로") { vm.retake() }
                     .buttonStyle(VOOutlineButtonStyle())
-                    .padding(.horizontal, 40)
             }
+            .padding(.horizontal, 50)
             .padding(.vertical, 20)
         }
     }

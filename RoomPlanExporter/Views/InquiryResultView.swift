@@ -7,6 +7,7 @@ struct InquiryResultView: View {
     @State private var selectedIndex: Int = 0
     @State private var showDeleteAlert  = false
     @State private var versionToDelete: ScanVersion? = nil
+    @State private var isTransparent: Bool = false
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
@@ -41,18 +42,15 @@ struct InquiryResultView: View {
             banner
 
             // 3D 뷰어 (메인 영역)
-            ZStack(alignment: .topTrailing) {
+            ZStack {
                 Color(.secondarySystemBackground)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 viewerContent
-
-                // 바닥 점유율 뱃지
-                if let dv = selectedDisplay, !dv.isPlaceholder, isViewerLoaded {
-                    FloorStatsBadge(isOptimized: dv.version.versionType == "optimized")
-                        .padding(.top, 12)
-                        .padding(.trailing, 16)
-                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                RoomStyleToggle(isTransparent: $isTransparent)
+                    .padding(12)
             }
 
             Divider()
@@ -63,10 +61,10 @@ struct InquiryResultView: View {
             Divider()
 
             // 메인으로 돌아가기
-            Button("메인으로 돌아가기") { vm.retake() }
+            Button("메인으로") { vm.retake() }
                 .buttonStyle(VOFilledButtonStyle())
-                .padding(.horizontal, 40)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 50)
+                .padding(.vertical, 10)
         }
         .confirmationDialog(
             "이 버전을 삭제하시겠어요?",
@@ -93,7 +91,7 @@ struct InquiryResultView: View {
             Image("logo_white")
                 .resizable()
                 .scaledToFit()
-                .frame(height: 20)
+                .frame(height: 32)
             VStack(alignment: .leading, spacing: 1) {
                 Text("공간 조회 결과")
                     .font(.subheadline.weight(.medium))
@@ -124,8 +122,8 @@ struct InquiryResultView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         case .loaded(let versionDetail):
-            FurnitureRealityKitView(detail: versionDetail)
-                .id(versionDetail.dataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")
+            FurnitureRealityKitView(detail: versionDetail, isTransparent: isTransparent)
+                .id("\(versionDetail.dataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")-\(isTransparent)")
                 .ignoresSafeArea()
         case .error:
             VStack(spacing: 12) {
@@ -163,7 +161,7 @@ struct InquiryResultView: View {
                 }
             }
         }
-        .frame(maxHeight: 260)
+        .frame(maxHeight: 180)
         .background(Color(.systemBackground))
     }
 
@@ -274,7 +272,7 @@ private struct VersionRow: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(isSelected ? Color.voBlue.opacity(0.06) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { if !isPlaceholder { onSelect() } }

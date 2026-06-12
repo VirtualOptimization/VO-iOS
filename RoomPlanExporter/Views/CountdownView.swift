@@ -8,7 +8,7 @@ struct CountdownView: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: 20) {
                 Text("\(vm.countdownValue)")
-                    .font(.system(size: 120, weight: .bold))
+                    .font(.system(size: 50, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
                     .contentTransition(.numericText(countsDown: true))

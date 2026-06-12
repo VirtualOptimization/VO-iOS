@@ -69,7 +69,7 @@ class RoomCaptureViewController: UIViewController {
         let doneButton = UIButton(type: .system)
         doneButton.setTitle("스캔 완료", for: .normal)
         doneButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        doneButton.backgroundColor = .systemBlue
+        doneButton.backgroundColor = .voBlue
         doneButton.setTitleColor(.white, for: .normal)
         doneButton.layer.cornerRadius = 22
         doneButton.translatesAutoresizingMaskIntoConstraints = false

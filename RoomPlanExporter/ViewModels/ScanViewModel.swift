@@ -1,5 +1,6 @@
 import Foundation
 import RoomPlan
+import SceneKit
 import simd
 
 // MARK: - ScanPhase
@@ -13,10 +14,24 @@ enum ScanPhase {
     case uploading(CapturedRoom)                                      // S3 파일 업로드 중
     case uploadComplete(CapturedRoom, confirmCode: String)            // 업로드 완료 – 확인 코드 표시
     case processing(CapturedRoom, confirmCode: String)                // 최적화 파이프라인 폴링 중
-    case optimized(CapturedRoom, [OptimizedObject])                   // 최적화 완료 – 결과 비교
+    case optimized(CapturedRoom, RoomVersionDetail)                    // 최적화 완료 – 결과 비교
     case inquiry                                                      // 확인 코드 입력
     case inquiryLoading(confirmCode: String)                          // 공간 조회 중
     case inquiryResult(ScanDetail)                                    // 조회 / 최적화 완료 결과
+}
+
+extension ScanPhase: Equatable {
+    static func == (lhs: ScanPhase, rhs: ScanPhase) -> Bool {
+        switch (lhs, rhs) {
+        case (.main, .main), (.guide, .guide), (.countdown, .countdown),
+             (.scanning, .scanning), (.inquiry, .inquiry): return true
+        case (.result, .result), (.uploading, .uploading),
+             (.uploadComplete, .uploadComplete), (.processing, .processing),
+             (.optimized, .optimized), (.inquiryLoading, .inquiryLoading),
+             (.inquiryResult, .inquiryResult): return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - ScanViewModel
@@ -62,23 +77,21 @@ final class ScanViewModel: ObservableObject {
         Task {
             do {
                 // 1. 로컬 저장
-                print("📁 [1/5] 로컬 저장 시작")
-                let (folderURL, modelFilenames, usdzExists) = try saveRoomData(room: room)
-                print("📁 [1/5] 로컬 저장 완료 – 모델 \(modelFilenames.count)개, USDZ=\(usdzExists)")
+                print("📁 [1/4] 로컬 저장 시작")
+                let (folderURL, usdzExists, emptyUsdzExists) = try saveRoomData(room: room)
+                print("📁 [1/4] 로컬 저장 완료 – USDZ=\(usdzExists), Empty=\(emptyUsdzExists)")
 
                 // 2. 업로드 세션 시작
-                print("🌐 [2/5] 업로드 세션 시작 (includeRoomUsdz=\(usdzExists))")
-                let startResp = try await optimizer.startScanUpload(
-                    modelFilenames: modelFilenames,
-                    includeRoomUsdz: usdzExists
-                )
+                print("🌐 [2/4] 업로드 세션 시작 (includeRoomUsdz=\(usdzExists), includeEmpty=\(emptyUsdzExists))")
+                let startResp = try await optimizer.startScanUpload(includeRoomUsdz: usdzExists,
+                                                                      includeRoomEmptyUsdz: emptyUsdzExists)
                 let confirmCode = startResp.confirmCode
-                print("🌐 [2/5] 세션 시작 완료 – confirmCode=\(confirmCode), 슬롯 \(startResp.uploads.count)개")
+                print("🌐 [2/4] 세션 시작 완료 – confirmCode=\(confirmCode), 슬롯 \(startResp.uploads.count)개")
 
-                // 3. 각 슬롯 파일을 S3에 PUT
+                // 3. 각 슬롯 파일을 S3에 PUT (room_data_json, room_usdz 두 슬롯)
                 var uploadedKeys: [String] = []
                 for (i, slot) in startResp.uploads.enumerated() {
-                    print("☁️ [3/5] S3 업로드 [\(i+1)/\(startResp.uploads.count)] \(slot.logicalName)")
+                    print("☁️ [3/4] S3 업로드 [\(i+1)/\(startResp.uploads.count)] \(slot.logicalName)")
                     let data = try readFileData(logicalName: slot.logicalName, folderURL: folderURL)
                     try await optimizer.uploadFileToS3(
                         presignedURL: slot.presignedURL,
@@ -86,16 +99,13 @@ final class ScanViewModel: ObservableObject {
                         contentType: slot.contentType
                     )
                     uploadedKeys.append(slot.s3Key)
-                    print("☁️ [3/5] 업로드 완료 \(slot.logicalName) (\(data.count) bytes)")
+                    print("☁️ [3/4] 업로드 완료 \(slot.logicalName) (\(data.count) bytes)")
                 }
 
-                // 4. S3 업로드 완료 – /complete는 최적화 요청 버튼에서 한 번만 호출
-                // 키 보관 (requestOptimization에서 사용)
-                pendingConfirmCode   = confirmCode
-                pendingUploadedKeys  = uploadedKeys
+                pendingConfirmCode  = confirmCode
+                pendingUploadedKeys = uploadedKeys
 
-                // 5. UploadCompleteView로 이동 (확인 코드 표시 + 최적화 버튼 제공)
-                print("🎉 [4/5] 업로드 완료 → UploadCompleteView")
+                print("🎉 [4/4] 업로드 완료 → UploadCompleteView")
                 phase = .uploadComplete(room, confirmCode: confirmCode)
 
             } catch {
@@ -105,22 +115,14 @@ final class ScanViewModel: ObservableObject {
         }
     }
 
-    /// logical_name → 실제 파일 Data 매핑
+    /// logical_name → 실제 파일 Data 매핑 (room_data_json, room_usdz 두 슬롯만)
     private func readFileData(logicalName: String, folderURL: URL) throws -> Data {
         let fileURL: URL
         switch logicalName {
-        case "room_data_json":
-            fileURL = folderURL.appending(path: "room_data.json")
-        case "room_usdz":
-            fileURL = folderURL.appending(path: "Room.usdz")
-        default:
-            // "model_chair_01.usdc" → "Models/chair_01.usdc"
-            if logicalName.hasPrefix("model_") {
-                let filename = String(logicalName.dropFirst("model_".count))
-                fileURL = folderURL.appending(path: "Models/\(filename)")
-            } else {
-                throw OptimizerError.invalidResponse
-            }
+        case "room_data_json":  fileURL = folderURL.appending(path: "room_data.json")
+        case "room_usdz":       fileURL = folderURL.appending(path: "Room.usdz")
+        case "room_empty_usdz": fileURL = folderURL.appending(path: "Room_empty.usdz")
+        default:                throw OptimizerError.invalidResponse
         }
         return try Data(contentsOf: fileURL)
     }
@@ -144,29 +146,6 @@ final class ScanViewModel: ObservableObject {
         throw OptimizerError.timeout
     }
 
-    /// GET /rooms/{code}/optimized → data_url JSON → OptimizedObject 배열
-    private func fetchOptimizedObjects(confirmCode: String) async throws -> [OptimizedObject] {
-        let versionDetail = try await optimizer.fetchVersionDetail(
-            confirmCode: confirmCode,
-            versionType: "optimized"
-        )
-        guard let dataURLStr = versionDetail.dataUrl,
-              let dataURL = URL(string: dataURLStr) else { return [] }
-
-        let (jsonData, _) = try await URLSession.shared.data(from: dataURL)
-        let payload = try JSONDecoder().decode(RoomDataPayload.self, from: jsonData)
-
-        return payload.objects.compactMap { obj -> OptimizedObject? in
-            guard let matrix = obj.simdTransform,
-                  let identifier = UUID(uuidString: obj.identifier) else { return nil }
-            return OptimizedObject(
-                identifier: identifier,
-                category:   obj.category,
-                center:     SIMD3(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z),
-                rotation:   simd_quatf(matrix)
-            )
-        }
-    }
 
     // MARK: Inquiry (공간 조회)
 
@@ -234,10 +213,11 @@ final class ScanViewModel: ObservableObject {
                 try await pollUntilComplete(confirmCode: confirmCode)
                 print("✅ 최적화 완료")
 
-                // 3. 서버 optimized JSON → OptimizedObject 배열 파싱 → OptimizedResultView
-                let objects = try await fetchOptimizedObjects(confirmCode: confirmCode)
-                print("📦 최적화 오브젝트 \(objects.count)개 – OptimizedResultView로 이동")
-                phase = .optimized(room, objects)
+                // 3. optimized 버전 상세 → OptimizedResultView (FurnitureRealityKitView가 직접 렌더링)
+                let versionDetail = try await optimizer.fetchVersionDetail(
+                    confirmCode: confirmCode, versionType: "optimized")
+                print("📦 최적화 버전 상세 취득 – OptimizedResultView로 이동")
+                phase = .optimized(room, versionDetail)
 
             } catch {
                 print("❌ 최적화 요청 실패: \(error)")
@@ -250,42 +230,35 @@ final class ScanViewModel: ObservableObject {
     // MARK: Room Data Export
 
     /// 로컬 임시 폴더에 스캔 데이터 저장
-    /// - returns: (폴더 URL, 복사된 모델 파일명 목록, Room.usdz 생성 여부)
-    private func saveRoomData(room: CapturedRoom) throws -> (folderURL: URL, modelFilenames: [String], usdzExists: Bool) {
+    /// - returns: (폴더 URL, Room.usdz 생성 여부, Room_empty.usdz 생성 여부)
+    private func saveRoomData(room: CapturedRoom) throws -> (folderURL: URL, usdzExists: Bool, emptyUsdzExists: Bool) {
         let fm = FileManager.default
         let ts = Int(Date().timeIntervalSince1970)
         let exportFolder = URL(filePath: NSTemporaryDirectory()).appending(path: "ScanExport_\(ts)")
-        let modelsFolder = exportFolder.appending(path: "Models")
-
         try fm.createDirectory(at: exportFolder, withIntermediateDirectories: true)
-        try fm.createDirectory(at: modelsFolder, withIntermediateDirectories: true)
 
         let mp = try? CapturedRoom.ModelProvider.load()
-        var copiedModels: [String: String] = [:]
-        var modelFilenames: [String] = []
-
-        if let mp {
-            for obj in room.objects {
-                guard let src = try? mp.modelFileURL(for: obj) else { continue }
-                let filename = src.lastPathComponent
-                let dst = modelsFolder.appending(path: filename)
-                if !fm.fileExists(atPath: dst.path()) { try? fm.copyItem(at: src, to: dst) }
-                copiedModels[obj.identifier.uuidString] = filename
-                if !modelFilenames.contains(filename) { modelFilenames.append(filename) }
-            }
-        }
 
         let usdzURL = exportFolder.appending(path: "Room.usdz")
         try? room.export(to: usdzURL, modelProvider: mp, exportOptions: [.parametric, .mesh, .model])
         let usdzExists = fm.fileExists(atPath: usdzURL.path())
         if !usdzExists { print("⚠️ Room.usdz 익스포트 실패 – usdz 없이 업로드") }
 
+        // 빈 방 USDZ: Room.usdz를 SceneKit으로 로드 → 가구 제거 + 문/창문 배경색 처리
+        let emptyUsdzURL = exportFolder.appending(path: "Room_empty.usdz")
+        if usdzExists {
+            makeEmptyUSDZ(from: usdzURL, output: emptyUsdzURL, room: room)
+        }
+        let emptyUsdzExists = fm.fileExists(atPath: emptyUsdzURL.path())
+        print(emptyUsdzExists ? "✅ Room_empty.usdz 생성 완료" : "⚠️ Room_empty.usdz 생성 실패")
+
         let objects = room.objects.map { obj -> FurnitureData in
             let t = obj.transform
+            let modelFileName = (try? mp?.modelFileURL(for: obj))?.lastPathComponent
             return FurnitureData(
                 identifier:    obj.identifier.uuidString,
                 category:      String(describing: obj.category),
-                modelFileName: copiedModels[obj.identifier.uuidString],
+                modelFileName: modelFileName,
                 center:        [t.columns.3.x, t.columns.3.y, t.columns.3.z],
                 dimensions:    [obj.dimensions.x, obj.dimensions.y, obj.dimensions.z],
                 frontVector:   [-t.columns.2.x, -t.columns.2.y, -t.columns.2.z],
@@ -313,7 +286,7 @@ final class ScanViewModel: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(payload).write(to: exportFolder.appending(path: "room_data.json"))
 
-        return (exportFolder, modelFilenames, usdzExists)
+        return (exportFolder, usdzExists, emptyUsdzExists)
     }
 
     private func surfaceData(_ s: CapturedRoom.Surface) -> SurfaceData {
@@ -342,6 +315,68 @@ final class ScanViewModel: ObservableObject {
             [m.columns.2.x, m.columns.2.y, m.columns.2.z, m.columns.2.w],
             [m.columns.3.x, m.columns.3.y, m.columns.3.z, m.columns.3.w]
         ]
+    }
+
+    // MARK: - Room_empty.usdz 생성
+    // Room.usdz를 SceneKit으로 로드, 가구 노드를 위치/이름으로 제거하고 재저장
+
+    /// Room.usdz → SceneKit: 가구 제거 + 문/창문 배경색(베이지) 재질 교체 → room_empty.usdz 저장.
+    /// SceneKit 재저장 시 OcclusionMaterial이 깨져 검정이 되므로, 배경색으로 교체해 뚫린 것처럼 보이게.
+    private func makeEmptyUSDZ(from source: URL, output: URL, room: CapturedRoom) {
+        guard let scene = try? SCNScene(url: source, options: nil) else {
+            print("⚠️ Empty USDZ: SCNScene 로드 실패"); return
+        }
+
+        let furnitureCenters: [SIMD3<Float>] = room.objects.map {
+            SIMD3($0.transform.columns.3.x, $0.transform.columns.3.y, $0.transform.columns.3.z)
+        }
+
+        let structuralKeywords: Set<String> = ["wall", "floor", "ceiling"]
+        let doorWindowKeywords: Set<String>  = ["door", "window", "opening"]
+        let furnitureKeywords:  Set<String>  = [
+            "chair", "table", "sofa", "bed", "storage", "television", "tv",
+            "refrigerator", "washer", "dryer", "washerdryer", "toilet", "bathtub",
+            "sink", "stove", "oven", "dishwasher", "fireplace", "stairs", "screen", "object"
+        ]
+
+        let bgMat: SCNMaterial = {
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor(red: 0.96, green: 0.94, blue: 0.90, alpha: 1.0)
+            m.lightingModel = .constant
+            return m
+        }()
+
+        func applyBgMaterial(to node: SCNNode) {
+            if node.geometry != nil { node.geometry?.materials = [bgMat] }
+            node.childNodes.forEach { applyBgMaterial(to: $0) }
+        }
+
+        func process(_ parent: SCNNode) {
+            var toRemove: [SCNNode] = []
+            for child in parent.childNodes {
+                let name = child.name?.lowercased() ?? ""
+                if structuralKeywords.contains(where: { name.contains($0) }) {
+                    process(child)
+                } else if doorWindowKeywords.contains(where: { name.contains($0) }) {
+                    applyBgMaterial(to: child)
+                    process(child)
+                } else if furnitureKeywords.contains(where: { name.contains($0) }) {
+                    toRemove.append(child)
+                } else {
+                    let wp  = child.worldPosition
+                    let pos = SIMD3<Float>(Float(wp.x), Float(wp.y), Float(wp.z))
+                    let isFurniture = furnitureCenters.contains { fc in
+                        let d = pos - fc; return d.x*d.x + d.y*d.y + d.z*d.z < 0.49
+                    }
+                    if isFurniture { toRemove.append(child) } else { process(child) }
+                }
+            }
+            toRemove.forEach { $0.removeFromParentNode() }
+        }
+
+        process(scene.rootNode)
+        let ok = scene.write(to: output, options: nil, delegate: nil, progressHandler: nil)
+        print(ok ? "✅ Room_empty.usdz 저장 완료" : "⚠️ Room_empty.usdz 저장 실패")
     }
 }
 

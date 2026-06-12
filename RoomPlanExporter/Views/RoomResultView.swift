@@ -35,7 +35,7 @@ struct RoomResultView: View {
                 Button("다시 찍기") { vm.retake() }
                     .buttonStyle(VOOutlineButtonStyle())
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 50)
             .padding(.vertical, 20)
         }
     }
