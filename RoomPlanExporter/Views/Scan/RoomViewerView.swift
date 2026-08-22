@@ -54,13 +54,21 @@ struct RoomViewerView: View {
     let capturedRoom: CapturedRoom
     var optimizedObjects: [OptimizedObject]? = nil
     var isTransparent: Bool = false
+    var wallColor: UIColor = .white
+    var floorColor: UIColor = .white
+    var furnitureTint: UIColor? = nil
+    /// true면 기본 모드에서도 Apple이 구워낸 USDZ 대신, 벽/바닥/가구를 따로 그리는
+    /// 렌더러(투시 모드와 동일)를 사용 — wallColor/floorColor/furnitureTint가 전부 반영됨.
+    var colorCustomizable: Bool = false
 
     @State private var usdzURL: URL? = nil
     @State private var isGenerating = true
 
+    private var usesProceduralRenderer: Bool { isTransparent || colorCustomizable }
+
     var body: some View {
         ZStack {
-            if isGenerating && !isTransparent {
+            if isGenerating && !usesProceduralRenderer {
                 VStack(spacing: 16) {
                     ProgressView().progressViewStyle(.circular).scaleEffect(1.5)
                     Text("방 모델 생성 중...").font(.subheadline).foregroundStyle(.secondary)
@@ -68,15 +76,19 @@ struct RoomViewerView: View {
             } else {
                 RealityKitRoomView(
                     capturedRoom: capturedRoom,
-                    usdzURL: isTransparent ? nil : usdzURL,
+                    usdzURL: usesProceduralRenderer ? nil : usdzURL,
                     optimizedObjects: optimizedObjects,
-                    isTransparent: isTransparent
+                    isTransparent: isTransparent,
+                    useCatalogRenderer: usesProceduralRenderer,
+                    wallColor: wallColor,
+                    floorColor: floorColor,
+                    furnitureTint: furnitureTint
                 )
                 .ignoresSafeArea()
             }
         }
         .task {
-            if isTransparent { isGenerating = false; return }
+            if usesProceduralRenderer { isGenerating = false; return }
             await generateUSDZ()
         }
     }
@@ -113,6 +125,11 @@ struct RealityKitRoomView: UIViewRepresentable {
     var usdzURL: URL?
     var optimizedObjects: [OptimizedObject]?
     var isTransparent: Bool = false
+    /// true면 isTransparent와 무관하게 카탈로그/색상 커스터마이즈 가능한 렌더러 사용
+    var useCatalogRenderer: Bool = false
+    var wallColor: UIColor = .white
+    var floorColor: UIColor = .white
+    var furnitureTint: UIColor? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -138,7 +155,7 @@ struct RealityKitRoomView: UIViewRepresentable {
         context.coordinator.roomAnchor = roomAnchor
         context.coordinator.arView = arView
 
-        if isTransparent {
+        if isTransparent || useCatalogRenderer {
             Task { @MainActor in
                 let opts = capturedRoom.objects.map { obj in
                     OptimizedObject(
@@ -180,10 +197,10 @@ struct RealityKitRoomView: UIViewRepresentable {
         do {
             let entity = try Entity.loadSync(contentsOf: url)
             anchor.addChild(entity)
-            // Apple USDZ의 바닥 재질이 흰색이므로 베이지 바닥으로 덮기
+            // Apple USDZ의 바닥 재질을 선택된 바닥 색으로 덮기
             for s in capturedRoom.floors {
                 anchor.addChild(makeSurface(s,
-                    color: UIColor(red: 0.91, green: 0.87, blue: 0.80, alpha: 1.0),
+                    color: floorColor,
                     depth: 0.025))
             }
             print("✅ USDZ 로드 완료")
@@ -224,6 +241,7 @@ struct RealityKitRoomView: UIViewRepresentable {
                         model.position = opt.center
                     }
                     model.orientation = opt.rotation
+                    if let furnitureTint { applyTint(to: model, color: furnitureTint) }
                     anchor.addChild(model)
                     placed = true
                     print("✅ 최적화 모델 배치: \(modelURL.lastPathComponent)")
@@ -235,7 +253,7 @@ struct RealityKitRoomView: UIViewRepresentable {
             // 폴백: OBB 박스
             if !placed {
                 var mat = SimpleMaterial()
-                mat.color = .init(tint: colorForCategory(original.category))
+                mat.color = .init(tint: furnitureTint ?? colorForCategory(original.category))
                 mat.roughness = 0.9; mat.metallic = 0.0
                 let e = original.dimensions
                 let entity = ModelEntity(
@@ -252,13 +270,11 @@ struct RealityKitRoomView: UIViewRepresentable {
     // MARK: - 씬 렌더링 (named entities - 최적화 애니메이션용)
 
     private func renderSurfaces(_ room: CapturedRoom, in anchor: AnchorEntity) {
-        let alpha: CGFloat = isTransparent ? 0.45 : 1.0
-        let wallColor  = UIColor(white: 1.0, alpha: alpha)
-        let floorColor = UIColor(red: 0.94, green: 0.92, blue: 0.90, alpha: 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.45 : 1.0)
         for wall in room.walls {
             let openings = capturedRoomOpenings(wall: wall, doors: room.doors, windows: room.windows)
             wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
-                         openings: openings, color: wallColor, depth: 0.04)
+                         openings: openings, color: effectiveWallColor, depth: 0.04)
                 .forEach { anchor.addChild($0) }
         }
         for s in room.floors { anchor.addChild(makeSurface(s, color: floorColor, depth: 0.01)) }
@@ -268,7 +284,7 @@ struct RealityKitRoomView: UIViewRepresentable {
         renderSurfaces(room, in: anchor)
         for obj in room.objects {
             var mat = SimpleMaterial()
-            mat.color = .init(tint: colorForCategory(obj.category))
+            mat.color = .init(tint: furnitureTint ?? colorForCategory(obj.category))
             mat.roughness = 0.9; mat.metallic = 0.0
             let e = obj.dimensions
             let entity = ModelEntity(
@@ -426,7 +442,7 @@ struct JsonRealityKitView: UIViewRepresentable {
         // 구조물
         // 벽: 반투명 흰색, 문/창문 스킵 → 자연 간극
         for s in roomData.walls  ?? [] { anchor.addChild(makeSurface(s, color: UIColor(white: 1.0, alpha: 0.45), depth: 0.04)) }
-        for s in roomData.floors ?? [] { anchor.addChild(makeSurface(s, color: UIColor(red: 0.94, green: 0.92, blue: 0.90, alpha: 1.0), depth: 0.01)) }
+        for s in roomData.floors ?? [] { anchor.addChild(makeSurface(s, color: UIColor.white, depth: 0.01)) }
 
         // 가구
         for obj in roomData.objects {
@@ -452,9 +468,26 @@ struct JsonRealityKitView: UIViewRepresentable {
             }
         }
 
-        // 2. 색상 박스 폴백
+        // 2. 로컬에 없으면 서버 카탈로그(usdc_url)에서 다운로드
+        if let fileName = obj.modelFileName,
+           let remoteURL = await CatalogModelCache.shared.usdcURL(forModelKey: fileName) {
+            do {
+                let (tmpURL, _) = try await URLSession.shared.download(from: remoteURL)
+                let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent(UUID().uuidString + ".usdc")
+                try FileManager.default.moveItem(at: tmpURL, to: destURL)
+                let model = try Entity.loadSync(contentsOf: destURL)
+                applyTransform(to: model, obj: obj)
+                print("✅ 서버 카탈로그 모델 로드: \(fileName)")
+                return model
+            } catch {
+                print("⚠️ 서버 카탈로그 로드 실패 (\(fileName)): \(error)")
+            }
+        }
+
+        // 3. 색상 박스 폴백
         var mat = SimpleMaterial()
-        mat.color = .init(tint: categoryColor(obj.category))
+        mat.color = .init(tint: categoryColor(obj.category ?? ""))
         mat.roughness = 0.9; mat.metallic = 0.0
         let dims = obj.dimensions ?? [0.5, 0.5, 0.5]
         let entity = ModelEntity(
@@ -486,8 +519,11 @@ struct JsonRealityKitView: UIViewRepresentable {
                 entity.transform = Transform(matrix: mat)
             }
         } else {
-            let c = obj.center
-            entity.position = c.count >= 3 ? SIMD3(c[0], c[1], c[2]) : .zero
+            if let c = obj.center, c.count >= 3 {
+                entity.position = SIMD3(c[0], c[1], c[2])
+            } else {
+                entity.position = .zero
+            }
         }
     }
 
@@ -597,8 +633,7 @@ struct UsdzRealityKitView: UIViewRepresentable {
         dir.shadow = DirectionalLightComponent.Shadow(maximumDistance: 10)
         dir.orientation = simd_quatf(angle: -.pi / 3, axis: [1, 0, 0])
         lightAnchor.addChild(dir)
-        let pt = PointLight()
-        pt.light.intensity = 1000; pt.position = [0, 4, 0]
+        let pt = PointLight(); pt.light.intensity = 1000; pt.position = [0, 4, 0]
         lightAnchor.addChild(pt)
         arView.scene.addAnchor(lightAnchor)
 
@@ -669,6 +704,11 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     let detail: RoomVersionDetail
     var capturedRoom: CapturedRoom? = nil   // B안: 제공 시 로컬 USDZ로 방 shell 렌더링
     var isTransparent: Bool = false         // 투명 모드: 반투명 벽 박스
+    var wallColor: UIColor = .white
+    var floorColor: UIColor = .white
+    /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
+    /// 사용자 본인의 AI 생성 가구(사진 기반)에는 적용하지 않음 — 실제 촬영 결과와 어긋나 보일 수 있어서.
+    var furnitureTint: UIColor? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -728,20 +768,18 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     @MainActor
     private func buildScene(into anchor: AnchorEntity, coordinator: Coordinator) async {
 
-        let wallAlpha: Float = isTransparent ? 0.35 : 1.0
-        let wallColor  = UIColor(white: 1.0, alpha: CGFloat(wallAlpha))
-        let floorColor = UIColor(red: 0.94, green: 0.92, blue: 0.90, alpha: 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.35 : 1.0)
 
         // ── capturedRoom이 있으면 방 구조 먼저 렌더링 (JSON 결과 기다리지 않음) ──
         if let room = capturedRoom {
             for wall in room.walls {
                 let openings = capturedRoomOpenings(wall: wall, doors: room.doors, windows: room.windows)
                 wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
-                             openings: openings, color: wallColor, depth: 0.04)
+                             openings: openings, color: effectiveWallColor, depth: 0.04)
                     .forEach { anchor.addChild($0) }
             }
             for floor in room.floors {
-                anchor.addChild(makeCapturedSurface(floor, color: floorColor, depth: 0.01))
+                anchor.addChild(makeCapturedSurface(floor, color: floorColor, depth: 0.025))
             }
 
             // 카메라 거리: capturedRoom 벽 기준
@@ -751,15 +789,19 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         }
 
         // ── JSON 다운로드 ──────────────────────────────────────────────────────
-        guard let dataURLString = detail.dataUrl,
+        guard let dataURLString = detail.effectiveDataUrl,
               let dataURL = URL(string: dataURLString) else {
-            print("⚠️ data_url 없음 – 방 구조만 표시")
+            print("⚠️ layout_json_url/data_url 없음 – 방 구조만 표시")
             return
         }
 
         let payload: RoomDataPayload
         do {
             let (jsonData, _) = try await URLSession.shared.data(from: dataURL)
+            if let raw = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+               let firstObj = (raw["objects"] as? [[String: Any]])?.first {
+                print("🔍 objects[0] 전체: \(firstObj)")
+            }
             payload = try JSONDecoder().decode(RoomDataPayload.self, from: jsonData)
             print("✅ JSON 파싱 완료: 오브젝트 \(payload.objects.count)개")
         } catch {
@@ -772,12 +814,18 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             var allPos: [SIMD3<Float>] = []
             for w in payload.walls   ?? [] { if let t = w.simdTransform { allPos.append(t.columns.3.xyz) } }
             for f in payload.floors  ?? [] { if let t = f.simdTransform { allPos.append(t.columns.3.xyz) } }
-            for o in payload.objects { let c = o.center; if c.count >= 3 { allPos.append(SIMD3(c[0], c[1], c[2])) } }
+            for o in payload.objects {
+                if let c = o.center, c.count >= 3 {
+                    allPos.append(SIMD3(c[0], c[1], c[2]))
+                } else if let m = o.simdTransform {
+                    allPos.append(m.columns.3.xyz)
+                }
+            }
             adjustCamera(anchor: anchor, coordinator: coordinator, positions: allPos)
 
             for wall in payload.walls ?? [] {
                 guard let wallT = wall.simdTransform else {
-                    anchor.addChild(makeSurfaceBox(surface: wall, color: wallColor, depth: 0.12))
+                    anchor.addChild(makeSurfaceBox(surface: wall, color: effectiveWallColor, depth: 0.12))
                     continue
                 }
                 let wallW = wall.dimensions.count > 0 ? wall.dimensions[0] : 1.0
@@ -785,45 +833,221 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let openings = payloadOpenings(wallTransform: wallT, wallW: wallW, wallH: wallH,
                                                doors: payload.doors ?? [], windows: payload.windows ?? [])
                 wallSegments(wallTransform: wallT, wallW: wallW, wallH: wallH,
-                             openings: openings, color: wallColor, depth: 0.12)
+                             openings: openings, color: effectiveWallColor, depth: 0.12)
                     .forEach { anchor.addChild($0) }
             }
             for floor in payload.floors ?? [] {
-                anchor.addChild(makeSurfaceBox(surface: floor, color: floorColor, depth: 0.02))
+                anchor.addChild(makeSurfaceBox(surface: floor, color: floorColor, depth: 0.025))
             }
         }
 
         // ── 가구 배치 ──────────────────────────────────────────────────────────
-        let modelUrls = detail.modelUrls ?? [:]
-        print("📦 model_urls 키: \(Array(modelUrls.keys))")
         for obj in payload.objects {
             guard let matrix = obj.simdTransform else { continue }
             let worldPos = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
 
             var placed = false
 
-            // 1. 로컬 RoomPlanCatalog.bundle 우선 로드
-            if let fileName = obj.modelFileName,
+            // 1. usdc_url (USER_EDITED 버전: S3 presigned URL)
+            if !placed, let urlStr = obj.usdcUrl, let remoteURL = URL(string: urlStr) {
+                do {
+                    let (tmpURL, _) = try await URLSession.shared.download(from: remoteURL)
+                    let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent(UUID().uuidString + ".usdc")
+                    try FileManager.default.moveItem(at: tmpURL, to: destURL)
+                    let loaded = try Entity.loadSync(contentsOf: destURL)
+                    applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
+                    anchor.addChild(loaded)
+                    placed = true
+                    print("  ✅ \(obj.modelFileName ?? "") usdc_url 로드 성공")
+                } catch {
+                    print("  ⚠️ usdc_url 로드 실패: \(error)")
+                }
+            }
+
+            // 2. 로컬 RoomPlanCatalog.bundle
+            if !placed, let fileName = obj.modelFileName,
                let localURL = findCatalogModel(named: fileName) {
                 do {
                     let loaded = try Entity.loadSync(contentsOf: localURL)
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
+                    if let furnitureTint { applyTint(to: loaded, color: furnitureTint) }
                     anchor.addChild(loaded)
                     placed = true
-                    print("  ✅ \(obj.category) (\(fileName)) 로컬 카탈로그 로드 성공")
+                    print("  ✅ \(obj.category ?? "") (\(fileName)) 로컬 카탈로그 로드 성공")
                 } catch {
-                    print("  ⚠️ \(obj.category) (\(fileName)) 로컬 로드 실패: \(error)")
+                    print("  ⚠️ \(obj.category ?? "") (\(fileName)) 로컬 로드 실패: \(error)")
                 }
             }
 
-            // 2. 로컬 실패 시 박스 폴백
+            // 3. 로컬에 없으면 서버 카탈로그(usdc_url)에서 다운로드
+            if !placed, let fileName = obj.modelFileName,
+               let remoteURL = await CatalogModelCache.shared.usdcURL(forModelKey: fileName) {
+                do {
+                    let (tmpURL, _) = try await URLSession.shared.download(from: remoteURL)
+                    let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent(UUID().uuidString + ".usdc")
+                    try FileManager.default.moveItem(at: tmpURL, to: destURL)
+                    let loaded = try Entity.loadSync(contentsOf: destURL)
+                    applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
+                    if let furnitureTint { applyTint(to: loaded, color: furnitureTint) }
+                    anchor.addChild(loaded)
+                    placed = true
+                    print("  ✅ \(obj.category ?? "") (\(fileName)) 서버 카탈로그 로드 성공")
+                } catch {
+                    print("  ⚠️ \(obj.category ?? "") (\(fileName)) 서버 카탈로그 로드 실패: \(error)")
+                }
+            }
+
+            // 4. 박스 폴백
             if !placed {
-                print("  📦 \(obj.category): 박스 폴백")
+                print("  📦 \(obj.category ?? ""): 박스 폴백")
                 let box = makeFallbackBox(for: obj)
                 box.transform = Transform(matrix: matrix)
                 anchor.addChild(box)
             }
         }
+    }
+
+    // MARK: - OBB 충돌 해소
+
+    private struct OBB2D {
+        var cx: Float
+        var cz: Float
+        let halfW: Float           // local X 방향 반폭
+        let halfD: Float           // local Z 방향 반폭
+        let axisX: SIMD2<Float>    // world XZ 평면에서 local X 축
+        let axisZ: SIMD2<Float>    // world XZ 평면에서 local Z 축
+
+        var center: SIMD2<Float> { SIMD2(cx, cz) }
+
+        func project(onto axis: SIMD2<Float>) -> ClosedRange<Float> {
+            let c = dot(center, axis)
+            let r = abs(dot(axisX * halfW, axis)) + abs(dot(axisZ * halfD, axis))
+            return (c - r)...(c + r)
+        }
+    }
+
+    // SAT: 겹치면 MTV 반환 (a를 +방향, b를 -방향으로 밀어낼 벡터), 안 겹치면 nil
+    private func satMTV(_ a: OBB2D, _ b: OBB2D) -> SIMD2<Float>? {
+        var minOverlap = Float.infinity
+        var bestAxis   = SIMD2<Float>.zero
+
+        for axis in [a.axisX, a.axisZ, b.axisX, b.axisZ] {
+            let pA = a.project(onto: axis)
+            let pB = b.project(onto: axis)
+            let overlap = min(pA.upperBound, pB.upperBound) - max(pA.lowerBound, pB.lowerBound)
+            if overlap <= 0 { return nil }
+            if overlap < minOverlap {
+                minOverlap = overlap
+                var dir = axis
+                if dot(a.center - b.center, axis) < 0 { dir = -dir }
+                bestAxis = dir
+            }
+        }
+        return bestAxis * minOverlap
+    }
+
+    private func resolveCollisions(_ objects: [RoomDataPayload.RoomObject],
+                                   floors: [RoomDataPayload.RoomSurface]? = nil,
+                                   walls:  [RoomDataPayload.RoomSurface]? = nil) -> [SIMD3<Float>] {
+        var centers: [SIMD3<Float>] = objects.map { obj in
+            if let m = obj.simdTransform { return m.columns.3.xyz }
+            if let c = obj.center, c.count >= 3 { return SIMD3(c[0], c[1], c[2]) }
+            return .zero
+        }
+
+        // ── 경계 1: 바닥 직사각형 클램프 ───────────────────────────────
+        struct RoomBounds {
+            let cx: Float; let cz: Float
+            let axX: SIMD2<Float>; let axZ: SIMD2<Float>
+            let halfW: Float; let halfD: Float
+        }
+        let roomBounds: RoomBounds? = {
+            guard let f = floors?.first, let ft = f.simdTransform, f.dimensions.count >= 2 else { return nil }
+            return RoomBounds(
+                cx: ft.columns.3.x, cz: ft.columns.3.z,
+                axX: SIMD2(ft.columns.0.x, ft.columns.0.z),
+                axZ: SIMD2(ft.columns.1.x, ft.columns.1.z),
+                halfW: f.dimensions[0] / 2, halfD: f.dimensions[1] / 2
+            )
+        }()
+
+        func clampToFloor(_ i: Int) {
+            guard let b = roomBounds else { return }
+            let d  = objects[i].dimensions ?? []
+            let hw = (d.count >= 1 ? d[0] : 0.5) / 2
+            let hd = (d.count >= 3 ? d[2] : 0.5) / 2
+            let offX = centers[i].x - b.cx; let offZ = centers[i].z - b.cz
+            var lx = offX * b.axX.x + offZ * b.axX.y
+            var lz = offX * b.axZ.x + offZ * b.axZ.y
+            lx = max(-(b.halfW - hw), min(b.halfW - hw, lx))
+            lz = max(-(b.halfD - hd), min(b.halfD - hd, lz))
+            centers[i].x = b.cx + lx * b.axX.x + lz * b.axZ.x
+            centers[i].z = b.cz + lx * b.axX.y + lz * b.axZ.y
+        }
+
+        // ── 경계 2: 벽 법선 방향 클램프 ─────────────────────────────────
+        // RoomPlan 벽 법선(col2)은 방 안쪽을 향하므로, distFromWall < objRadius 이면 벽 쪽으로 침범
+        func clampToWalls(_ i: Int) {
+            guard let walls else { return }
+            let d  = objects[i].dimensions ?? []
+            let hw = (d.count >= 1 ? d[0] : 0.5) / 2
+            let hd = (d.count >= 3 ? d[2] : 0.5) / 2
+            let objRadius = max(hw, hd)
+            for wall in walls {
+                guard let wt = wall.simdTransform else { continue }
+                let normXZ = SIMD2<Float>(wt.columns.2.x, wt.columns.2.z)
+                let nLen   = length(normXZ); guard nLen > 0.001 else { continue }
+                let wallNorm = normXZ / nLen
+                let wallDir  = SIMD2<Float>(wt.columns.0.x, wt.columns.0.z)
+                let wCenterXZ = SIMD2<Float>(wt.columns.3.x, wt.columns.3.z)
+                let toObj = SIMD2<Float>(centers[i].x, centers[i].z) - wCenterXZ
+                // 벽 측면 범위 밖은 무관
+                let wallHalfW = (wall.dimensions.count > 0 ? wall.dimensions[0] : 1.0) / 2
+                guard abs(dot(toObj, wallDir)) < wallHalfW + objRadius else { continue }
+                // 법선 방향 거리가 objRadius 미만이면 밀어냄
+                let distFromWall = dot(toObj, wallNorm)
+                if distFromWall < objRadius {
+                    let push = objRadius - distFromWall
+                    centers[i].x += wallNorm.x * push
+                    centers[i].z += wallNorm.y * push
+                }
+            }
+        }
+
+        func makeOBB(_ obj: RoomDataPayload.RoomObject, cx: Float, cz: Float) -> OBB2D? {
+            guard let m = obj.simdTransform, let d = obj.dimensions, d.count >= 3 else { return nil }
+            let ax = SIMD2<Float>(m.columns.0.x, m.columns.0.z)
+            let az = SIMD2<Float>(m.columns.2.x, m.columns.2.z)
+            let lenX = length(ax), lenZ = length(az)
+            guard lenX > 0.001, lenZ > 0.001 else { return nil }
+            return OBB2D(cx: cx, cz: cz, halfW: d[0]/2, halfD: d[2]/2,
+                         axisX: ax/lenX, axisZ: az/lenZ)
+        }
+
+        // 시작 전 초기 위치도 경계 안으로 정렬
+        for i in 0..<objects.count { clampToFloor(i); clampToWalls(i) }
+
+        for _ in 0..<30 {
+            var moved = false
+            for i in 0..<objects.count {
+                for j in (i + 1)..<objects.count {
+                    guard let obbA = makeOBB(objects[i], cx: centers[i].x, cz: centers[i].z),
+                          let obbB = makeOBB(objects[j], cx: centers[j].x, cz: centers[j].z)
+                    else { continue }
+                    if let mtv = satMTV(obbA, obbB) {
+                        centers[i].x += mtv.x / 2; centers[i].z += mtv.y / 2
+                        centers[j].x -= mtv.x / 2; centers[j].z -= mtv.y / 2
+                        clampToFloor(i); clampToWalls(i)
+                        clampToFloor(j); clampToWalls(j)
+                        moved = true
+                    }
+                }
+            }
+            if !moved { break }
+        }
+        return centers
     }
 
     /// anchor 센터링 + 카메라 거리 조정
@@ -852,9 +1076,11 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         if dims.count >= 3, bSize.x > 0.001, bSize.y > 0.001, bSize.z > 0.001 {
             let scale = SIMD3<Float>(dims[0] / bSize.x, dims[1] / bSize.y, dims[2] / bSize.z)
             let pivot = (bounds.max + bounds.min) / 2
+            let orientation = simd_quatf(matrix)
+            // rotation 적용 후 pivot 오프셋을 보정해야 center가 worldPos에 정확히 놓임
             entity.scale       = scale
-            entity.position    = worldPos - pivot * scale
-            entity.orientation = simd_quatf(matrix)
+            entity.orientation = orientation
+            entity.position    = worldPos - orientation.act(pivot * scale)
         } else {
             entity.transform = Transform(matrix: matrix)
         }
@@ -871,6 +1097,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         }
         return nil
     }
+
 
     /// CapturedRoom.Surface를 박스 ModelEntity로 변환 (바닥 덮기용)
     private func makeCapturedSurface(_ s: CapturedRoom.Surface, color: UIColor, depth: Float) -> ModelEntity {
@@ -902,10 +1129,10 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         return entity
     }
 
-    /// 카테고리별 색상 박스 (배경색과 겹치지 않는 뚜렷한 색상)
+    /// 카테고리별 색상 박스 (배경색과 겹치지 않는 뚜렷한 색상). furnitureTint 있으면 그걸로 통일.
     private func makeFallbackBox(for obj: RoomDataPayload.RoomObject) -> ModelEntity {
         var mat = SimpleMaterial()
-        mat.color = .init(tint: colorForCategory(obj.category))
+        mat.color = .init(tint: furnitureTint ?? colorForCategory(obj.category ?? ""))
         mat.roughness = 0.9
         let dims = obj.dimensions ?? [0.5, 0.5, 0.5]
         return ModelEntity(
@@ -1091,6 +1318,25 @@ private func wallBox(lx: Float, ly: Float, w: Float, h: Float,
     t.columns.3 = wallTransform * SIMD4<Float>(lx, ly, 0, 1)
     entity.transform = Transform(matrix: t)
     return entity
+}
+
+// MARK: - 머티리얼 헬퍼
+
+/// 카탈로그 모델(및 하위 파츠 전부)의 머티리얼을 단색으로 덮어씀
+fileprivate func applyTint(to entity: Entity, color: UIColor) {
+    if let model = entity as? ModelEntity, var comp = model.model {
+        comp.materials = comp.materials.map { _ in
+            var mat = SimpleMaterial()
+            mat.color = .init(tint: color)
+            mat.roughness = 0.9
+            mat.metallic = 0.0
+            return mat
+        }
+        model.model = comp
+    }
+    for child in entity.children {
+        applyTint(to: child, color: color)
+    }
 }
 
 // MARK: - SIMD 헬퍼

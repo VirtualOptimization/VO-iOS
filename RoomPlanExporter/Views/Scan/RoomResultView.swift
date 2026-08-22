@@ -8,12 +8,22 @@ struct RoomResultView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Banner
-            Text("내 방이 잘 스캔되었는지 확인해보세요")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.voBlue)
+            ZStack {
+                Text("내 방이 잘 스캔되었는지 확인해보세요")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                HStack {
+                    Image("logo_white")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 42)
+                    Spacer()
+                }
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 20)
+            .voGlassBanner()
 
             // 3D Viewer
             RoomViewerView(capturedRoom: room)
@@ -38,5 +48,10 @@ struct RoomResultView: View {
             .padding(.horizontal, 50)
             .padding(.vertical, 20)
         }
+        .alert("저장 실패", isPresented: .constant(vm.uploadError != nil), actions: {
+            Button("확인") { vm.uploadError = nil }
+        }, message: {
+            Text(vm.uploadError ?? "")
+        })
     }
 }

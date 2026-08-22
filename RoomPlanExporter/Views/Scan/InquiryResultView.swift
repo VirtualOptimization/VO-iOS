@@ -4,14 +4,32 @@ struct InquiryResultView: View {
     let detail: ScanDetail
     @ObservedObject var vm: ScanViewModel
 
-    @State private var selectedIndex: Int = 0
+    @State private var selectedIndex: Int
     @State private var showDeleteAlert  = false
+
+    init(detail: ScanDetail, vm: ScanViewModel) {
+        self.detail = detail
+        self._vm = ObservedObject(wrappedValue: vm)
+
+        // USER_EDITED 중 version_no가 가장 높은 것 우선 선택
+        let userEditedVersions = detail.versions.filter { $0.versionType.uppercased() == "USER_EDITED" }
+        if let best = userEditedVersions.max(by: { ($0.versionNo ?? 0) < ($1.versionNo ?? 0) }),
+           let idx = detail.versions.firstIndex(where: { $0.versionId == best.versionId }) {
+            _selectedIndex = State(initialValue: idx)
+        } else if let idx = detail.versions.firstIndex(where: { $0.versionType.uppercased() == "OPTIMIZED" }) {
+            _selectedIndex = State(initialValue: idx)
+        } else {
+            _selectedIndex = State(initialValue: 0)
+        }
+    }
     @State private var versionToDelete: ScanVersion? = nil
     @State private var isTransparent: Bool = false
+    @State private var material = RoomMaterial.presets[0]
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
     @State private var cachedData: [String: RoomVersionDetail] = [:]
+    @State private var loadTask: Task<Void, Never>?
 
     private let service = RoomOptimizerService()
 
@@ -19,9 +37,9 @@ struct InquiryResultView: View {
 
     private var displayVersions: [DisplayVersion] {
         let real = detail.versions.map { DisplayVersion(version: $0, isPlaceholder: false) }
-        let hasVR = detail.versions.contains { $0.versionType == "vr_modified" }
-        if hasVR { return real }
-        let placeholder = ScanVersion(placeholderType: "vr_modified")
+        let hasUserEdited = detail.versions.contains { $0.versionType.uppercased() == "USER_EDITED" }
+        if hasUserEdited { return real }
+        let placeholder = ScanVersion(placeholderType: "USER_EDITED")
         return real + [DisplayVersion(version: placeholder, isPlaceholder: true)]
     }
 
@@ -52,6 +70,10 @@ struct InquiryResultView: View {
                 RoomStyleToggle(isTransparent: $isTransparent)
                     .padding(12)
             }
+            .overlay(alignment: .bottomLeading) {
+                MaterialSwatchPicker(selected: $material)
+                    .padding(12)
+            }
 
             Divider()
 
@@ -66,46 +88,86 @@ struct InquiryResultView: View {
                 .padding(.horizontal, 50)
                 .padding(.vertical, 10)
         }
-        .confirmationDialog(
-            "이 버전을 삭제하시겠어요?",
-            isPresented: $showDeleteAlert,
-            titleVisibility: .visible
-        ) {
-            Button("삭제", role: .destructive) {
-                if let v = versionToDelete, let vid = v.versionId {
-                    vm.deleteVersion(confirmCode: detail.confirmCode, versionId: vid, from: detail)
+        .overlay {
+            if showDeleteAlert {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                        .onTapGesture { showDeleteAlert = false }
+                    VStack(spacing: 0) {
+                        VStack(spacing: 6) {
+                            Text("'\(versionToDelete?.displayName ?? "")'가 삭제됩니다.")
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                            Text("삭제된 버전은 복구할 수 없어요.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 20)
+
+                        Divider()
+
+                        HStack(spacing: 0) {
+                            Button {
+                                showDeleteAlert = false
+                            } label: {
+                                Text("취소")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Divider().frame(height: 50)
+                            Button {
+                                showDeleteAlert = false
+                                if let v = versionToDelete, let vid = v.versionId {
+                                    vm.deleteVersion(roomId: detail.roomId, versionId: vid, from: detail)
+                                }
+                            } label: {
+                                Text("삭제")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    .voGlassCard(cornerRadius: 14)
+                    .padding(.horizontal, 44)
                 }
             }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text("삭제된 버전은 복구할 수 없어요")
         }
         .onAppear { loadViewer() }
-        .onChange(of: selectedIndex) { _, _ in loadViewer() }
+        .onChange(of: selectedIndex) { _, _ in
+            isTransparent = false
+            loadViewer()
+        }
+        .alert("삭제 실패", isPresented: .constant(vm.inquiryError != nil), actions: {
+            Button("확인") { vm.inquiryError = nil }
+        }, message: {
+            Text(vm.inquiryError ?? "")
+        })
     }
 
     // MARK: 배너
 
     private var banner: some View {
-        HStack(spacing: 10) {
-            Image("logo_white")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("공간 조회 결과")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white)
-                Text(detail.confirmCode)
-                    .font(.caption.bold())
-                    .tracking(2)
-                    .foregroundStyle(.white.opacity(0.8))
+        ZStack {
+            Text(vm.savedSpaces.first { $0.roomId == detail.roomId }?.name ?? "내 공간")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+
+            HStack {
+                Image("logo_white")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 42)
+                Spacer()
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 12)
+        .padding(.vertical, 5)
         .padding(.horizontal, 20)
-        .background(Color.voBlue)
+        .voGlassBanner()
     }
 
     // MARK: 뷰어 콘텐츠
@@ -122,8 +184,10 @@ struct InquiryResultView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         case .loaded(let versionDetail):
-            FurnitureRealityKitView(detail: versionDetail, isTransparent: isTransparent)
-                .id("\(versionDetail.dataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")-\(isTransparent)")
+            FurnitureRealityKitView(detail: versionDetail, isTransparent: isTransparent,
+                                    wallColor: material.wallColor, floorColor: material.floorColor,
+                                    furnitureTint: material.furnitureColor)
+                .id("\(versionDetail.effectiveDataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")-\(isTransparent)-\(material.id)")
                 .ignoresSafeArea()
         case .error:
             VStack(spacing: 12) {
@@ -142,6 +206,7 @@ struct InquiryResultView: View {
     private var versionListPanel: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
+                Spacer().frame(height: 6)
                 ForEach(Array(displayVersions.enumerated()), id: \.offset) { index, dv in
                     VersionRow(
                         version: dv.version,
@@ -161,7 +226,7 @@ struct InquiryResultView: View {
                 }
             }
         }
-        .frame(maxHeight: 180)
+        .frame(maxHeight: 140)
         .background(Color(.systemBackground))
     }
 
@@ -169,27 +234,54 @@ struct InquiryResultView: View {
 
     private func loadViewer(force: Bool = false) {
         guard let dv = selectedDisplay, !dv.isPlaceholder else {
+            loadTask?.cancel()
             viewerState = .idle
             return
         }
-        let cacheKey = dv.version.versionType   // "origin" | "optimized"
+        let cacheKey = dv.version.versionId.map { String($0) } ?? dv.version.versionType
 
         if !force, let cached = cachedData[cacheKey] {
+            loadTask?.cancel()
             viewerState = .loaded(cached)
             return
         }
 
+        loadTask?.cancel()
         viewerState = .loading
 
-        Task {
+        let snapshot = dv  // 선택 시점 캡처
+        loadTask = Task {
+            guard let accessToken = KeychainTokenStore.get(.accessToken) else {
+                viewerState = .error
+                return
+            }
             do {
-                let versionDetail = try await service.fetchVersionDetail(
-                    confirmCode: detail.confirmCode,
-                    versionType: dv.version.versionType
-                )
+                let versionDetail: RoomVersionDetail
+                let versionType = snapshot.version.versionType.uppercased()
+                if let vid = snapshot.version.versionId {
+                    versionDetail = try await service.fetchVersionDetailById(
+                        roomId: detail.roomId,
+                        versionId: vid,
+                        accessToken: accessToken
+                    )
+                } else if versionType == "ORIGINAL" || versionType == "ORIGIN" {
+                    versionDetail = try await service.fetchVersionDetail(
+                        roomId: detail.roomId,
+                        versionType: "origin",
+                        accessToken: accessToken
+                    )
+                } else {
+                    versionDetail = try await service.fetchVersionDetail(
+                        roomId: detail.roomId,
+                        versionType: snapshot.version.versionType.lowercased(),
+                        accessToken: accessToken
+                    )
+                }
+                guard !Task.isCancelled else { return }
                 cachedData[cacheKey] = versionDetail
                 viewerState = .loaded(versionDetail)
             } catch {
+                guard !Task.isCancelled else { return }
                 print("❌ 버전 상세 로드 실패: \(error)")
                 viewerState = .error
             }
@@ -215,11 +307,11 @@ private struct VersionRow: View {
 
     // 삭제는 VR 수정본(vr_modified)만 가능
     private var canDelete: Bool {
-        !isPlaceholder && version.versionType == "vr_modified" && version.versionId != nil
+        !isPlaceholder && version.canBeDeleted && version.versionId != nil
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             // 라디오 인디케이터
             Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                 .font(.system(size: 20))
@@ -248,6 +340,7 @@ private struct VersionRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.secondary.opacity(0.4), in: Capsule())
+                            .padding(.leading, 6)
                     }
                 }
 
@@ -266,7 +359,8 @@ private struct VersionRow: View {
                     Image(systemName: "trash")
                         .font(.subheadline)
                         .foregroundStyle(.red.opacity(0.75))
-                        .padding(8)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -279,11 +373,24 @@ private struct VersionRow: View {
     }
 
     private func shortDate(_ iso: String) -> String {
-        let f = ISO8601DateFormatter()
-        guard let d = f.date(from: iso) else { return "" }
+        let formatters: [ISO8601DateFormatter] = [
+            { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f }(),
+            { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }(),
+            { let f = ISO8601DateFormatter(); return f }()
+        ]
         let df = DateFormatter()
         df.locale = Locale(identifier: "ko_KR")
         df.dateFormat = "MM.dd HH:mm"
-        return df.string(from: d)
+        for f in formatters {
+            if let d = f.date(from: iso) { return df.string(from: d) }
+        }
+        // 타임존 없는 형식 폴백 ("2024-01-15T10:30:00.123456")
+        let plain = DateFormatter()
+        plain.locale = Locale(identifier: "ko_KR")
+        plain.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        if let d = plain.date(from: iso) { return df.string(from: d) }
+        plain.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        if let d = plain.date(from: iso) { return df.string(from: d) }
+        return ""
     }
 }

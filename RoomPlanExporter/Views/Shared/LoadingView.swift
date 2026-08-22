@@ -17,6 +17,9 @@ struct LoadingView: View {
                 // -0.3 → 1.3 범위로 이동: 시작/끝이 둘 다 화면 밖 → 리셋이 안 보임
                 let raw = CGFloat(t.truncatingRemainder(dividingBy: 2.2) / 2.2)
                 let scan = raw * 1.6 - 0.3
+                // 오프셋이 일정하게 증가하는 값들이라, 양쪽을 다 0...1로 클램프해야
+                // (한쪽만 클램프하면 scan이 범위 밖일 때 순서가 역전돼 경고가 남) 항상 오름차순이 보장됨.
+                let clamp: (CGFloat) -> CGFloat = { min(max($0, 0), 1) }
 
                 ZStack {
                     Image("logo_white")
@@ -31,10 +34,10 @@ struct LoadingView: View {
                         .mask(
                             LinearGradient(
                                 stops: [
-                                    .init(color: .clear, location: max(0, scan - 0.5)),
-                                    .init(color: .black, location: max(0, scan - 0.05)),
-                                    .init(color: .black, location: min(1, scan + 0.05)),
-                                    .init(color: .clear, location: min(1, scan + 0.4))
+                                    .init(color: .clear, location: clamp(scan - 0.5)),
+                                    .init(color: .black, location: clamp(scan - 0.05)),
+                                    .init(color: .black, location: clamp(scan + 0.05)),
+                                    .init(color: .clear, location: clamp(scan + 0.4))
                                 ],
                                 startPoint: .leading,
                                 endPoint: .trailing

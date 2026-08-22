@@ -19,7 +19,7 @@ struct ScanGuideView: View {
             Button { vm.phase = .main } label: {
                 Image(systemName: "chevron.left")
                     .font(.semiBold20)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.voBlue)
                     .padding(.horizontal, 30)
                     .padding(.top, 20)
                     .padding(.bottom, 40)
@@ -91,9 +91,9 @@ private struct TipRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.subheadline.bold())
+                    .font(.semiBold14)
                 Text(detail)
-                    .font(.caption)
+                    .font(.regular12)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -64,44 +64,44 @@ extension Font {
     }
     
     // MARK: - ExtraBold
-    static var extraBold24: Font { .pretendard(.extraBold, size: 24) }
-    
+    static var extraBold24: Font { .pretendard(.extraBold, size: 22) }
+
     // MARK: - Bold
-    static var bold18: Font { .pretendard(.bold, size: 18) }
-    static var bold22: Font { .pretendard(.bold, size: 22) }
-    static var bold24: Font { .pretendard(.bold, size: 24) }
-    
+    static var bold18: Font { .pretendard(.bold, size: 16) }
+    static var bold22: Font { .pretendard(.bold, size: 20) }
+    static var bold24: Font { .pretendard(.bold, size: 22) }
+
     // MARK: - SemiBold
     static var semiBold38: Font { .pretendard(.semibold, size: 38) }
     static var semiBold24: Font { .pretendard(.semibold, size: 24) }
-    static var semiBold20: Font { .pretendard(.semibold, size: 20) } //추가
-    static var semiBold18: Font { .pretendard(.semibold, size: 18) }
-    static var semiBold16: Font { .pretendard(.semibold, size: 16) }
-    static var semiBold14: Font { .pretendard(.semibold, size: 14) }
-    static var semiBold13: Font { .pretendard(.semibold, size: 13) }
-    static var semiBold12: Font { .pretendard(.semibold, size: 12) }
-    static var semiBold10: Font { .pretendard(.semibold, size: 10) }
-    
+    static var semiBold20: Font { .pretendard(.semibold, size: 22) }
+    static var semiBold18: Font { .pretendard(.semibold, size: 20) }
+    static var semiBold16: Font { .pretendard(.semibold, size: 18) }
+    static var semiBold14: Font { .pretendard(.semibold, size: 16) }
+    static var semiBold13: Font { .pretendard(.semibold, size: 15) }
+    static var semiBold12: Font { .pretendard(.semibold, size: 14) }
+    static var semiBold10: Font { .pretendard(.semibold, size: 12) }
+
     // MARK: - Regular
     static var regular20: Font { .pretendard(.regular, size: 20) }
     static var regular18: Font { .pretendard(.regular, size: 18) }
-    static var regular14: Font { .pretendard(.regular, size: 14) }
-    static var regular13: Font { .pretendard(.regular, size: 13) }
-    static var regular12: Font { .pretendard(.regular, size: 12) }
-    static var regular11: Font { .pretendard(.regular, size: 11) }
-    static var regular10: Font { .pretendard(.regular, size: 10) }
-    static var regular09: Font { .pretendard(.regular, size: 9) }
-    
+    static var regular14: Font { .pretendard(.regular, size: 16) }
+    static var regular13: Font { .pretendard(.regular, size: 15) }
+    static var regular12: Font { .pretendard(.regular, size: 14) }
+    static var regular11: Font { .pretendard(.regular, size: 13) }
+    static var regular10: Font { .pretendard(.regular, size: 12) }
+    static var regular09: Font { .pretendard(.regular, size: 11) }
+
     // MARK: - Medium
-    static var medium24: Font { .pretendard(.medium, size: 24) } //추가
+    static var medium24: Font { .pretendard(.medium, size: 24) }
     static var medium18: Font { .pretendard(.medium, size: 18) }
-    static var medium16: Font { .pretendard(.medium, size: 16) }
-    static var medium14: Font { .pretendard(.medium, size: 14) }
-    static var medium13: Font { .pretendard(.medium, size: 13) }
-    static var medium12: Font { .pretendard(.medium, size: 12) }
-    static var medium10: Font { .pretendard(.medium, size: 10) }
-    static var medium8: Font { .pretendard(.medium, size: 8) }
-    
+    static var medium16: Font { .pretendard(.medium, size: 18) }
+    static var medium14: Font { .pretendard(.medium, size: 16) }
+    static var medium13: Font { .pretendard(.medium, size: 15) }
+    static var medium12: Font { .pretendard(.medium, size: 14) }
+    static var medium10: Font { .pretendard(.medium, size: 12) }
+    static var medium8: Font { .pretendard(.medium, size: 10) }
+
     // MARK: - Light
-    static var light14: Font { .pretendard(.light, size: 14) }
+    static var light14: Font { .pretendard(.light, size: 16) }
 }

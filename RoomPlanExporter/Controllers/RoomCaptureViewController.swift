@@ -91,7 +91,7 @@ class RoomCaptureViewController: UIViewController {
             doneButton.widthAnchor.constraint(equalToConstant: 160),
             doneButton.heightAnchor.constraint(equalToConstant: 44),
             
-            cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 56),
             cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
         ])
     }
