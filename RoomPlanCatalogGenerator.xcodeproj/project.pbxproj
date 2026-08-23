@@ -3,16 +3,54 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */; };
 		070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
 		070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
+		AB01000000000000AB010000 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01000000000000AB010001 /* ScanViewModel.swift */; };
+		AB02000000000000AB020000 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB02000000000000AB020001 /* MainView.swift */; };
+		AB03000000000000AB030000 /* ScanGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB03000000000000AB030001 /* ScanGuideView.swift */; };
+		AB04000000000000AB040000 /* CountdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB04000000000000AB040001 /* CountdownView.swift */; };
+		AB05000000000000AB050000 /* ScanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB05000000000000AB050001 /* ScanningView.swift */; };
+		AB06000000000000AB060000 /* RoomResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB06000000000000AB060001 /* RoomResultView.swift */; };
+		AB07000000000000AB070000 /* VOButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB07000000000000AB070001 /* VOButtonStyles.swift */; };
+		AB63000000000000AB630000 /* VOGlassStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB63000000000000AB630001 /* VOGlassStyles.swift */; };
+		AB08000000000000AB080000 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB08000000000000AB080001 /* LoadingView.swift */; };
+		AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB09000000000000AB090001 /* UploadCompleteView.swift */; };
+		AB10000000000000AB100000 /* OptimizedResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB10000000000000AB100001 /* OptimizedResultView.swift */; };
+		AB11000000000000AB110000 /* InquiryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB11000000000000AB110001 /* InquiryView.swift */; };
+		AB12000000000000AB120000 /* InquiryResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12000000000000AB120001 /* InquiryResultView.swift */; };
+		AB13000000000000AB130000 /* FurnitureCaptureGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB13000000000000AB130001 /* FurnitureCaptureGuideView.swift */; };
+		AB56000000000000AB560000 /* FurnitureLidarCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB56000000000000AB560001 /* FurnitureLidarCaptureView.swift */; };
+		AB57000000000000AB570000 /* FurnitureMethodPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB57000000000000AB570001 /* FurnitureMethodPickerView.swift */; };
+		AB60000000000000AB600000 /* FurnitureAIEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB60000000000000AB600001 /* FurnitureAIEntryView.swift */; };
+		AB62000000000000AB620000 /* FurnitureAICompareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB62000000000000AB620001 /* FurnitureAICompareView.swift */; };
+		AB16000000000000AB160000 /* FurnitureListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB16000000000000AB160001 /* FurnitureListView.swift */; };
+		AB17000000000000AB170000 /* FurnitureItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB17000000000000AB170001 /* FurnitureItem.swift */; };
+		AB19000000000000AB190000 /* FurnitureProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB19000000000000AB190001 /* FurnitureProcessingView.swift */; };
+		AB20000000000000AB200000 /* FurnitureModelResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB20000000000000AB200001 /* FurnitureModelResultView.swift */; };
+		AB30000000000000AB300000 /* OuterGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = AB30000000000000AB300001 /* OuterGlow.metal */; };
+		AB32000000000000AB320000 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB32000000000000AB320001 /* SplashView.swift */; };
+		AB33000000000000AB330000 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB33000000000000AB330001 /* LoginView.swift */; };
+		AB34000000000000AB340000 /* SignUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB34000000000000AB340001 /* SignUpView.swift */; };
+		AB35000000000000AB350000 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB35000000000000AB350001 /* AuthViewModel.swift */; };
+		AB36000000000000AB360000 /* SavedSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB36000000000000AB360001 /* SavedSpace.swift */; };
+		AB41000000000000AB410000 /* APIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB41000000000000AB410001 /* APIConfig.swift */; };
+		AB42000000000000AB420000 /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB42000000000000AB420001 /* KeychainTokenStore.swift */; };
+		AB43000000000000AB430000 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB43000000000000AB430001 /* AuthService.swift */; };
+		AB44000000000000AB440000 /* FurnitureModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB44000000000000AB440001 /* FurnitureModelService.swift */; };
+		AB58000000000000AB580000 /* TripoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB58000000000000AB580001 /* TripoService.swift */; };
+		AB59000000000000AB590000 /* MeshyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB59000000000000AB590001 /* MeshyService.swift */; };
+		AB45000000000000AB450000 /* CatalogModelCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB45000000000000AB450001 /* CatalogModelCache.swift */; };
+		AB46000000000000AB460000 /* ScanViewModel+Furniture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB46000000000000AB460001 /* ScanViewModel+Furniture.swift */; };
+		AB47000000000000AB470000 /* ScanViewModel+RoomScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB47000000000000AB470001 /* ScanViewModel+RoomScan.swift */; };
+		AB48000000000000AB480000 /* ScanViewModel+Inquiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */; };
+		AB49000000000000AB490000 /* ScanViewModel+RoomExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB49000000000000AB490001 /* ScanViewModel+RoomExport.swift */; };
 		C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92329F3703800930252 /* RoomPlanExporterApp.swift */; };
 		C427F92629F3703800930252 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C427F92529F3703800930252 /* ContentView.swift */; };
-		C427F92829F3703800930252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92729F3703800930252 /* Assets.xcassets */; };
 		C427F92B29F3703800930252 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C427F92A29F3703800930252 /* Preview Assets.xcassets */; };
 		C48B87B629EE07A600D29743 /* RoomPlanCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48B87B329EE07A600D29743 /* RoomPlanCatalog.swift */; };
 		C48B87B729EE07A600D29743 /* RoomPlanCatalogGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48B87B429EE07A600D29743 /* RoomPlanCatalogGenerator.swift */; };
@@ -40,10 +78,37 @@
 		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
 		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
 		070B96AB2F86475100C0E62A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		AB01000000000000AB010001 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
+		AB02000000000000AB020001 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		AB03000000000000AB030001 /* ScanGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanGuideView.swift; sourceTree = "<group>"; };
+		AB04000000000000AB040001 /* CountdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownView.swift; sourceTree = "<group>"; };
+		AB05000000000000AB050001 /* ScanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanningView.swift; sourceTree = "<group>"; };
+		AB06000000000000AB060001 /* RoomResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomResultView.swift; sourceTree = "<group>"; };
+		AB07000000000000AB070001 /* VOButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VOButtonStyles.swift; sourceTree = "<group>"; };
+		AB63000000000000AB630001 /* VOGlassStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VOGlassStyles.swift; sourceTree = "<group>"; };
+		AB08000000000000AB080001 /* LoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingView.swift; sourceTree = "<group>"; };
+		AB09000000000000AB090001 /* UploadCompleteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadCompleteView.swift; sourceTree = "<group>"; };
+		AB10000000000000AB100001 /* OptimizedResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptimizedResultView.swift; sourceTree = "<group>"; };
+		AB11000000000000AB110001 /* InquiryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryView.swift; sourceTree = "<group>"; };
+		AB12000000000000AB120001 /* InquiryResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InquiryResultView.swift; sourceTree = "<group>"; };
+		AB13000000000000AB130001 /* FurnitureCaptureGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureCaptureGuideView.swift; sourceTree = "<group>"; };
+		AB56000000000000AB560001 /* FurnitureLidarCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureLidarCaptureView.swift; sourceTree = "<group>"; };
+		AB57000000000000AB570001 /* FurnitureMethodPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureMethodPickerView.swift; sourceTree = "<group>"; };
+		AB60000000000000AB600001 /* FurnitureAIEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureAIEntryView.swift; sourceTree = "<group>"; };
+		AB62000000000000AB620001 /* FurnitureAICompareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureAICompareView.swift; sourceTree = "<group>"; };
+		AB16000000000000AB160001 /* FurnitureListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureListView.swift; sourceTree = "<group>"; };
+		AB17000000000000AB170001 /* FurnitureItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureItem.swift; sourceTree = "<group>"; };
+		AB19000000000000AB190001 /* FurnitureProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureProcessingView.swift; sourceTree = "<group>"; };
+		AB20000000000000AB200001 /* FurnitureModelResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureModelResultView.swift; sourceTree = "<group>"; };
+		AB30000000000000AB300001 /* OuterGlow.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OuterGlow.metal; sourceTree = "<group>"; };
+		AB32000000000000AB320001 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
+		AB33000000000000AB330001 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		AB34000000000000AB340001 /* SignUpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignUpView.swift; sourceTree = "<group>"; };
+		AB35000000000000AB350001 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
+		AB36000000000000AB360001 /* SavedSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSpace.swift; sourceTree = "<group>"; };
 		C427F92129F3703800930252 /* RoomPlanExporter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomPlanExporter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C427F92329F3703800930252 /* RoomPlanExporterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanExporterApp.swift; sourceTree = "<group>"; };
 		C427F92529F3703800930252 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		C427F92729F3703800930252 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C427F92A29F3703800930252 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		C47199DE2A05D856007C3501 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		C48B87A929EE075100D29743 /* RoomPlanCatalogGenerator */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = RoomPlanCatalogGenerator; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -54,7 +119,23 @@
 		C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = RoomPlanCatalog.bundle; sourceTree = "<group>"; };
 		EF9D187789686CAA71B3CCA0 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
 		F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
+		AB40000000000000AB400001 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Secrets.xcconfig; path = Configuration/Secrets.xcconfig; sourceTree = "<group>"; };
+		AB41000000000000AB410001 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
+		AB42000000000000AB420001 /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
+		AB43000000000000AB430001 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		AB44000000000000AB440001 /* FurnitureModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureModelService.swift; sourceTree = "<group>"; };
+		AB58000000000000AB580001 /* TripoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripoService.swift; sourceTree = "<group>"; };
+		AB59000000000000AB590001 /* MeshyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshyService.swift; sourceTree = "<group>"; };
+		AB45000000000000AB450001 /* CatalogModelCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogModelCache.swift; sourceTree = "<group>"; };
+		AB46000000000000AB460001 /* ScanViewModel+Furniture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+Furniture.swift"; sourceTree = "<group>"; };
+		AB47000000000000AB470001 /* ScanViewModel+RoomScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+RoomScan.swift"; sourceTree = "<group>"; };
+		AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+Inquiry.swift"; sourceTree = "<group>"; };
+		AB49000000000000AB490001 /* ScanViewModel+RoomExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+RoomExport.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		0707F8022FD98F3E000A5749 /* Resources */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Resources; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C427F91E29F3703800930252 /* Frameworks */ = {
@@ -89,22 +170,142 @@
 			isa = PBXGroup;
 			children = (
 				F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */,
+				AB40000000000000AB400001 /* Secrets.xcconfig */,
 			);
 			name = Configuration;
+			sourceTree = "<group>";
+		};
+		AB21000000000000AB210000 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C427F92529F3703800930252 /* ContentView.swift */,
+				AB50000000000000AB500000 /* Auth */,
+				AB51000000000000AB510000 /* Scan */,
+				AB52000000000000AB520000 /* Furniture */,
+				AB53000000000000AB530000 /* Shared */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		AB50000000000000AB500000 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				AB32000000000000AB320001 /* SplashView.swift */,
+				AB33000000000000AB330001 /* LoginView.swift */,
+				AB34000000000000AB340001 /* SignUpView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		AB51000000000000AB510000 /* Scan */ = {
+			isa = PBXGroup;
+			children = (
+				AB02000000000000AB020001 /* MainView.swift */,
+				AB03000000000000AB030001 /* ScanGuideView.swift */,
+				AB04000000000000AB040001 /* CountdownView.swift */,
+				AB05000000000000AB050001 /* ScanningView.swift */,
+				AB06000000000000AB060001 /* RoomResultView.swift */,
+				AB09000000000000AB090001 /* UploadCompleteView.swift */,
+				AB10000000000000AB100001 /* OptimizedResultView.swift */,
+				AB11000000000000AB110001 /* InquiryView.swift */,
+				AB12000000000000AB120001 /* InquiryResultView.swift */,
+				070B96A72F86451700C0E62A /* RoomViewerView.swift */,
+			);
+			path = Scan;
+			sourceTree = "<group>";
+		};
+		AB52000000000000AB520000 /* Furniture */ = {
+			isa = PBXGroup;
+			children = (
+				AB13000000000000AB130001 /* FurnitureCaptureGuideView.swift */,
+				AB56000000000000AB560001 /* FurnitureLidarCaptureView.swift */,
+				AB57000000000000AB570001 /* FurnitureMethodPickerView.swift */,
+				AB60000000000000AB600001 /* FurnitureAIEntryView.swift */,
+				AB19000000000000AB190001 /* FurnitureProcessingView.swift */,
+				AB20000000000000AB200001 /* FurnitureModelResultView.swift */,
+				AB16000000000000AB160001 /* FurnitureListView.swift */,
+				AB62000000000000AB620001 /* FurnitureAICompareView.swift */,
+			);
+			path = Furniture;
+			sourceTree = "<group>";
+		};
+		AB53000000000000AB530000 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				AB08000000000000AB080001 /* LoadingView.swift */,
+				AB07000000000000AB070001 /* VOButtonStyles.swift */,
+				AB63000000000000AB630001 /* VOGlassStyles.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		AB22000000000000AB220000 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				AB01000000000000AB010001 /* ScanViewModel.swift */,
+				AB46000000000000AB460001 /* ScanViewModel+Furniture.swift */,
+				AB47000000000000AB470001 /* ScanViewModel+RoomScan.swift */,
+				AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */,
+				AB49000000000000AB490001 /* ScanViewModel+RoomExport.swift */,
+				AB35000000000000AB350001 /* AuthViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		AB23000000000000AB230000 /* Controllers */ = {
+			isa = PBXGroup;
+			children = (
+				070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */,
+			);
+			path = Controllers;
+			sourceTree = "<group>";
+		};
+		AB24000000000000AB240000 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */,
+				AB41000000000000AB410001 /* APIConfig.swift */,
+				AB42000000000000AB420001 /* KeychainTokenStore.swift */,
+				AB43000000000000AB430001 /* AuthService.swift */,
+				AB44000000000000AB440001 /* FurnitureModelService.swift */,
+				AB45000000000000AB450001 /* CatalogModelCache.swift */,
+				AB58000000000000AB580001 /* TripoService.swift */,
+				AB59000000000000AB590001 /* MeshyService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		AB25000000000000AB250000 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AB17000000000000AB170001 /* FurnitureItem.swift */,
+				AB36000000000000AB360001 /* SavedSpace.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AB31000000000000AB310000 /* Shaders */ = {
+			isa = PBXGroup;
+			children = (
+				AB30000000000000AB300001 /* OuterGlow.metal */,
+			);
+			path = Shaders;
 			sourceTree = "<group>";
 		};
 		C427F92229F3703800930252 /* RoomPlanExporter */ = {
 			isa = PBXGroup;
 			children = (
+				0707F8022FD98F3E000A5749 /* Resources */,
 				070B96AB2F86475100C0E62A /* Info.plist */,
 				C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */,
 				C427F92329F3703800930252 /* RoomPlanExporterApp.swift */,
-				C427F92529F3703800930252 /* ContentView.swift */,
-				C427F92729F3703800930252 /* Assets.xcassets */,
 				C427F92929F3703800930252 /* Preview Content */,
-				070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */,
-				070B96A72F86451700C0E62A /* RoomViewerView.swift */,
-				070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */,
+				AB21000000000000AB210000 /* Views */,
+				AB22000000000000AB220000 /* ViewModels */,
+				AB23000000000000AB230000 /* Controllers */,
+				AB24000000000000AB240000 /* Services */,
+				AB25000000000000AB250000 /* Models */,
+				AB31000000000000AB310000 /* Shaders */,
 			);
 			path = RoomPlanExporter;
 			sourceTree = "<group>";
@@ -171,6 +372,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0707F8022FD98F3E000A5749 /* Resources */,
 			);
 			name = RoomPlanExporter;
 			productName = RoomPlanExporter;
@@ -246,7 +450,6 @@
 			files = (
 				C427F92B29F3703800930252 /* Preview Assets.xcassets in Resources */,
 				C499B2B129F375A000E99C6C /* RoomPlanCatalog.bundle in Resources */,
-				C427F92829F3703800930252 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -257,12 +460,51 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB30000000000000AB300000 /* OuterGlow.metal in Sources */,
 				C499B2AF29F3743100E99C6C /* RoomPlanCatalog.swift in Sources */,
 				C427F92629F3703800930252 /* ContentView.swift in Sources */,
 				070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */,
 				070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */,
 				070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */,
 				C427F92429F3703800930252 /* RoomPlanExporterApp.swift in Sources */,
+				AB01000000000000AB010000 /* ScanViewModel.swift in Sources */,
+				AB02000000000000AB020000 /* MainView.swift in Sources */,
+				AB03000000000000AB030000 /* ScanGuideView.swift in Sources */,
+				AB04000000000000AB040000 /* CountdownView.swift in Sources */,
+				AB05000000000000AB050000 /* ScanningView.swift in Sources */,
+				AB06000000000000AB060000 /* RoomResultView.swift in Sources */,
+				AB07000000000000AB070000 /* VOButtonStyles.swift in Sources */,
+				AB63000000000000AB630000 /* VOGlassStyles.swift in Sources */,
+				AB08000000000000AB080000 /* LoadingView.swift in Sources */,
+				AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */,
+				AB10000000000000AB100000 /* OptimizedResultView.swift in Sources */,
+				AB11000000000000AB110000 /* InquiryView.swift in Sources */,
+				AB12000000000000AB120000 /* InquiryResultView.swift in Sources */,
+				AB13000000000000AB130000 /* FurnitureCaptureGuideView.swift in Sources */,
+				AB56000000000000AB560000 /* FurnitureLidarCaptureView.swift in Sources */,
+				AB57000000000000AB570000 /* FurnitureMethodPickerView.swift in Sources */,
+				AB60000000000000AB600000 /* FurnitureAIEntryView.swift in Sources */,
+				AB62000000000000AB620000 /* FurnitureAICompareView.swift in Sources */,
+				AB16000000000000AB160000 /* FurnitureListView.swift in Sources */,
+				AB17000000000000AB170000 /* FurnitureItem.swift in Sources */,
+				AB19000000000000AB190000 /* FurnitureProcessingView.swift in Sources */,
+				AB20000000000000AB200000 /* FurnitureModelResultView.swift in Sources */,
+				AB32000000000000AB320000 /* SplashView.swift in Sources */,
+				AB33000000000000AB330000 /* LoginView.swift in Sources */,
+				AB34000000000000AB340000 /* SignUpView.swift in Sources */,
+				AB35000000000000AB350000 /* AuthViewModel.swift in Sources */,
+				AB36000000000000AB360000 /* SavedSpace.swift in Sources */,
+				AB41000000000000AB410000 /* APIConfig.swift in Sources */,
+				AB42000000000000AB420000 /* KeychainTokenStore.swift in Sources */,
+				AB43000000000000AB430000 /* AuthService.swift in Sources */,
+				AB44000000000000AB440000 /* FurnitureModelService.swift in Sources */,
+				AB58000000000000AB580000 /* TripoService.swift in Sources */,
+				AB59000000000000AB590000 /* MeshyService.swift in Sources */,
+				AB45000000000000AB450000 /* CatalogModelCache.swift in Sources */,
+				AB46000000000000AB460000 /* ScanViewModel+Furniture.swift in Sources */,
+				AB47000000000000AB470000 /* ScanViewModel+RoomScan.swift in Sources */,
+				AB48000000000000AB480000 /* ScanViewModel+Inquiry.swift in Sources */,
+				AB49000000000000AB490000 /* ScanViewModel+RoomExport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -281,7 +523,7 @@
 /* Begin XCBuildConfiguration section */
 		C427F92C29F3703800930252 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */;
+			baseConfigurationReference = AB40000000000000AB400001 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -291,7 +533,7 @@
 				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";
@@ -322,7 +564,7 @@
 		};
 		C427F92D29F3703800930252 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F0023E5E5C3F6BC1636361AD /* SampleCode.xcconfig */;
+			baseConfigurationReference = AB40000000000000AB400001 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -332,7 +574,7 @@
 				DEVELOPMENT_TEAM = 87QYF25CFF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RoomPlanExporter/Info.plist;
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "This app does not use calendar access.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "방을 스캔하기 위해 카메라가 필요합니다.";
