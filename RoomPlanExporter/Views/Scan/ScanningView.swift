@@ -8,7 +8,8 @@ struct ScanningView: View {
         ZStack(alignment: .top) {
             RoomCaptureViewControllerRepresentable(
                 onFinish: { vm.scanCompleted($0) },
-                onCancel:  { vm.retake() }
+                onCancel: { vm.retake() },
+                onFail: { _ in vm.retake() }
             )
             .ignoresSafeArea()
 

@@ -379,6 +379,274 @@ struct RealityKitRoomView: UIViewRepresentable {
     }
 }
 
+// MARK: - 가구를 드래그로 옮길 수 있는 RealityKit 뷰
+//
+// 스캔 직후 인식된 가구를 손가락으로 눌러 바닥 위에서 옮기거나 탭해서 90도씩 돌릴 수 있는 뷰어.
+// RoomResultView(스캔 결과 확인 화면)에서 사용한다.
+
+fileprivate func fallbackColorForCategory(_ category: CapturedRoom.Object.Category) -> UIColor {
+    switch category {
+    case .chair:        return UIColor(red: 0.72, green: 0.83, blue: 0.90, alpha: 1.0)
+    case .sofa:         return UIColor(red: 0.72, green: 0.83, blue: 0.90, alpha: 1.0)
+    case .table:        return UIColor(red: 0.88, green: 0.82, blue: 0.72, alpha: 1.0)
+    case .bed:          return UIColor(red: 0.95, green: 0.80, blue: 0.83, alpha: 1.0)
+    case .storage:      return UIColor(red: 0.78, green: 0.82, blue: 0.76, alpha: 1.0)
+    case .television:   return UIColor(red: 0.55, green: 0.55, blue: 0.58, alpha: 1.0)
+    case .refrigerator: return UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
+    case .washerDryer:  return UIColor(red: 0.82, green: 0.88, blue: 0.92, alpha: 1.0)
+    default:            return UIColor(red: 0.80, green: 0.78, blue: 0.75, alpha: 1.0)
+    }
+}
+
+struct DraggableFurnitureRoomView: UIViewRepresentable {
+    let capturedRoom: CapturedRoom
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> ARView {
+        let arView = ARView(frame: .zero)
+        arView.environment.background = .color(UIColor(red: 0.96, green: 0.94, blue: 0.90, alpha: 1.0))
+        arView.cameraMode = .nonAR
+        arView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let camAnchor = AnchorEntity(world: .zero)
+        let camera = PerspectiveCamera()
+        camera.camera.fieldOfViewInDegrees = 60
+        camera.position = SIMD3(0, 6, 4.5)
+        camera.look(at: .zero, from: camera.position, relativeTo: nil)
+        camAnchor.addChild(camera)
+        arView.scene.addAnchor(camAnchor)
+
+        let lightAnchor = AnchorEntity(world: .zero)
+        let dir = DirectionalLight()
+        dir.light.intensity = 3000; dir.light.color = .white
+        dir.orientation = simd_quatf(angle: -.pi/3, axis: [1, 0, 0])
+        lightAnchor.addChild(dir)
+        let pt = PointLight()
+        pt.light.intensity = 1000; pt.position = [0, 4, 0]
+        lightAnchor.addChild(pt)
+        arView.scene.addAnchor(lightAnchor)
+
+        let roomAnchor = AnchorEntity(world: .zero)
+        arView.scene.addAnchor(roomAnchor)
+        context.coordinator.arView = arView
+        context.coordinator.roomAnchor = roomAnchor
+
+        // 벽 (문/창문 구멍 반영) + 바닥
+        for wall in capturedRoom.walls {
+            let openings = capturedRoomOpenings(wall: wall, doors: capturedRoom.doors, windows: capturedRoom.windows)
+            wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
+                        openings: openings, color: .white, depth: 0.04)
+                .forEach { roomAnchor.addChild($0) }
+        }
+        for floor in capturedRoom.floors {
+            var mat = SimpleMaterial()
+            mat.color = .init(tint: .white); mat.roughness = 0.9; mat.metallic = 0.0
+            let entity = ModelEntity(
+                mesh: .generateBox(width: floor.dimensions.x, height: floor.dimensions.y, depth: 0.01),
+                materials: [mat]
+            )
+            entity.transform = Transform(matrix: floor.transform)
+            roomAnchor.addChild(entity)
+        }
+        // 드래그 시 벽 밖으로 못 나가게 클램프할 기준 (첫 번째 바닥 사각형 기준 — 요철 있는 방은 근사치)
+        if let floor = capturedRoom.floors.first {
+            context.coordinator.floorTransform = floor.transform
+            context.coordinator.floorHalfExtent = SIMD2(floor.dimensions.x / 2, floor.dimensions.y / 2)
+        }
+
+        // 가구 (드래그 대상 — "furniture_" 접두사로 히트테스트에서 구분)
+        // RoomPlanCatalog 번들의 실제 모델을 시도하고, 실패하면 카테고리 색상 박스로 폴백
+        // (loadOptimizedScene과 동일한 방식) — 카탈로그 로딩은 비동기라 Task로 감싼다.
+        Task { @MainActor [capturedRoom] in
+            let mp = try? CapturedRoom.ModelProvider.load()
+            for obj in capturedRoom.objects {
+                let t = obj.transform
+                let center = SIMD3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+                let rotation = simd_quatf(t)
+                let d = obj.dimensions
+
+                var placed: Entity? = nil
+                if let mp, let modelURL = try? mp.modelFileURL(for: obj),
+                   let model = try? Entity.loadSync(contentsOf: modelURL) {
+                    let bounds = model.visualBounds(relativeTo: model)
+                    let bSize = bounds.max - bounds.min
+                    if bSize.x > 0.001 && bSize.y > 0.001 && bSize.z > 0.001 {
+                        model.scale = SIMD3(d.x / bSize.x, d.y / bSize.y, d.z / bSize.z)
+                        let centerOffset = (bounds.max + bounds.min) / 2
+                        model.position = center - centerOffset * model.scale
+                    } else {
+                        model.position = center
+                    }
+                    model.orientation = rotation
+                    placed = model
+                }
+
+                let entity: Entity
+                if let placed {
+                    entity = placed
+                } else {
+                    var mat = SimpleMaterial()
+                    mat.color = .init(tint: fallbackColorForCategory(obj.category))
+                    mat.roughness = 0.9; mat.metallic = 0.0
+                    let box = ModelEntity(
+                        mesh: .generateBox(width: d.x, height: d.y, depth: d.z, cornerRadius: 0.03),
+                        materials: [mat]
+                    )
+                    box.transform = Transform(matrix: t)
+                    entity = box
+                }
+
+                entity.name = "furniture_\(obj.identifier.uuidString)"
+                // entity(at:) 히트테스트가 CollisionComponent 기준으로 동작하므로 반드시 생성해줘야 함
+                // (카탈로그 모델은 메쉬가 자식 노드에 있을 수 있어 recursive: true)
+                entity.generateCollisionShapes(recursive: true)
+                roomAnchor.addChild(entity)
+            }
+        }
+
+        // 1손가락 = 가구 드래그/배경 회전 전용. 손가락 개수를 제한 안 하면 2손가락 회전 제스처와
+        // 같은 터치를 두고 경쟁하다 pan이 먼저 가로채서 회전 제스처가 아예 안 먹는 문제가 생김.
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        panGesture.maximumNumberOfTouches = 1
+        arView.addGestureRecognizer(panGesture)
+        arView.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch)))
+        arView.addGestureRecognizer(UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation)))
+        arView.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap)))
+
+        return arView
+    }
+
+    func updateUIView(_ uiView: ARView, context: Context) {}
+
+    // MARK: - Coordinator (가구 드래그 vs 배경 회전 분기)
+
+    class Coordinator: NSObject {
+        weak var arView: ARView?
+        var roomAnchor: AnchorEntity?
+
+        /// 바닥 사각형 기준 (드래그 클램프용)
+        var floorTransform: simd_float4x4?
+        var floorHalfExtent: SIMD2<Float>?
+
+        private var draggedEntity: Entity?
+        private var dragPlaneY: Float = 0
+        private var dragOffset: SIMD3<Float> = .zero
+        private var isOrbiting = false
+
+        private var lastScale: Float = 1
+        private var currentScale: Float = 1
+        private var lastRotation: Float = 0
+
+        @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
+            if g.state == .began { lastScale = currentScale }
+            currentScale = max(0.3, min(6.0, lastScale * Float(g.scale)))
+            roomAnchor?.scale = SIMD3(repeating: currentScale)
+        }
+
+        @objc func handleRotation(_ g: UIRotationGestureRecognizer) {
+            if g.state == .began { lastRotation = 0 }
+            let delta = Float(g.rotation) - lastRotation
+            lastRotation = Float(g.rotation)
+            roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+        }
+
+        /// 가구를 탭하면 그 자리에서 90도씩 회전 (제자리 회전 — 위치는 그대로).
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard g.state == .ended, let arView else { return }
+            guard let hit = furnitureRoot(from: arView.entity(at: g.location(in: arView))) else { return }
+            hit.orientation *= simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+        }
+
+        /// 가구를 눌렀으면 그 가구를 바닥 평면 위에서 드래그, 빈 공간을 눌렀으면 방 전체를 회전.
+        @objc func handlePan(_ g: UIPanGestureRecognizer) {
+            guard let arView else { return }
+            let loc = g.location(in: arView)
+
+            switch g.state {
+            case .began:
+                if let hit = furnitureRoot(from: arView.entity(at: loc)) {
+                    draggedEntity = hit
+                    let worldPos = hit.position(relativeTo: nil)
+                    dragPlaneY = worldPos.y
+                    dragOffset = floorPoint(at: loc, planeY: dragPlaneY, in: arView).map { worldPos - $0 } ?? .zero
+                } else {
+                    draggedEntity = nil
+                    isOrbiting = true
+                }
+            case .changed:
+                if let draggedEntity {
+                    if let touchPoint = floorPoint(at: loc, planeY: dragPlaneY, in: arView) {
+                        draggedEntity.setPosition(touchPoint + dragOffset, relativeTo: nil)
+                        clampEntityToFloor(draggedEntity)
+                    }
+                } else if isOrbiting {
+                    let delta = Float(g.translation(in: arView).x) * 0.005
+                    roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+                    g.setTranslation(.zero, in: arView)
+                }
+            case .ended, .cancelled, .failed:
+                draggedEntity = nil
+                isOrbiting = false
+            default: break
+            }
+        }
+
+        /// 히트테스트로 잡힌 엔티티가 카탈로그 모델의 자식 메쉬일 수 있으므로,
+        /// "furniture_" 이름을 가진 조상까지 거슬러 올라가 실제로 옮길 루트 엔티티를 찾는다.
+        private func furnitureRoot(from entity: Entity?) -> Entity? {
+            var current = entity
+            while let e = current {
+                if e.name.hasPrefix("furniture_") { return e }
+                current = e.parent
+            }
+            return nil
+        }
+
+        /// 화면 좌표 → 카메라 레이와 y=planeY 수평면의 교점 (월드 좌표)
+        private func floorPoint(at location: CGPoint, planeY: Float, in arView: ARView) -> SIMD3<Float>? {
+            guard let ray = arView.ray(through: location) else { return nil }
+            guard abs(ray.direction.y) > 0.0001 else { return nil }
+            let t = (planeY - ray.origin.y) / ray.direction.y
+            guard t > 0 else { return nil }
+            return ray.origin + ray.direction * t
+        }
+
+        /// 엔티티의 실제 렌더링 바운드(카탈로그 모델은 피벗이 중심이 아닐 수 있어 근사 마진 대신 실측)가
+        /// 바닥 사각형을 벗어난 만큼 다시 안쪽으로 밀어넣는다 — 그래야 몸체가 벽에 안 걸침.
+        private func clampEntityToFloor(_ entity: Entity) {
+            guard let floorTransform, let floorHalfExtent else { return }
+            let bounds = entity.visualBounds(relativeTo: nil)
+            let inv = floorTransform.inverse
+
+            var minLocalX = Float.greatestFiniteMagnitude, maxLocalX = -Float.greatestFiniteMagnitude
+            var minLocalY = Float.greatestFiniteMagnitude, maxLocalY = -Float.greatestFiniteMagnitude
+            for cx in [bounds.min.x, bounds.max.x] {
+                for cy in [bounds.min.y, bounds.max.y] {
+                    for cz in [bounds.min.z, bounds.max.z] {
+                        let local = inv * SIMD4<Float>(cx, cy, cz, 1)
+                        minLocalX = min(minLocalX, local.x); maxLocalX = max(maxLocalX, local.x)
+                        minLocalY = min(minLocalY, local.y); maxLocalY = max(maxLocalY, local.y)
+                    }
+                }
+            }
+
+            var dx: Float = 0
+            if maxLocalX > floorHalfExtent.x { dx = floorHalfExtent.x - maxLocalX }
+            else if minLocalX < -floorHalfExtent.x { dx = -floorHalfExtent.x - minLocalX }
+            var dy: Float = 0
+            if maxLocalY > floorHalfExtent.y { dy = floorHalfExtent.y - maxLocalY }
+            else if minLocalY < -floorHalfExtent.y { dy = -floorHalfExtent.y - minLocalY }
+            guard dx != 0 || dy != 0 else { return }
+
+            let worldDelta4 = floorTransform * SIMD4<Float>(dx, dy, 0, 0)   // w=0 → 이동량만 회전, 평행이동 없음
+            let worldDelta = SIMD3(worldDelta4.x, worldDelta4.y, worldDelta4.z)
+            let currentWorld = entity.position(relativeTo: nil)
+            entity.setPosition(currentWorld + worldDelta, relativeTo: nil)
+        }
+    }
+}
+
 // MARK: - JSON 데이터 기반 RealityKit 뷰 (공간 조회용)
 //
 // room_data.json / room_data.roomplan_optimized.json을 파싱한 RoomDataPayload를 받아
@@ -709,6 +977,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
     /// 사용자 본인의 AI 생성 가구(사진 기반)에는 적용하지 않음 — 실제 촬영 결과와 어긋나 보일 수 있어서.
     var furnitureTint: UIColor? = nil
+    /// true면 가구를 탭+드래그로 옮기거나 탭해서 90도씩 돌릴 수 있음 (내 공간 조회 화면 전용).
+    /// false(기본값)면 기존과 동일하게 화면 전체가 카메라 조작(회전/줌) 전용.
+    var allowsDragging: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -747,12 +1018,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         // 씬 빌드 (비동기) – coordinator 전달로 카메라 거리 조정 가능
         let coord = context.coordinator
+        coord.allowsDragging = allowsDragging
         Task { @MainActor in await buildScene(into: roomAnchor, coordinator: coord) }
 
         // 제스처
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        // 드래그 모드에서는 1손가락 = 가구 드래그/배경 회전 전용으로 제한 — 안 그러면 2손가락 회전
+        // 제스처와 같은 터치를 두고 경쟁하다 pan이 먼저 가로채서 회전이 아예 안 먹는 문제가 생김.
+        if allowsDragging { panGesture.maximumNumberOfTouches = 1 }
+        arView.addGestureRecognizer(panGesture)
         arView.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator,    action: #selector(Coordinator.handlePinch)))
         arView.addGestureRecognizer(UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation)))
-        arView.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator,      action: #selector(Coordinator.handlePan)))
+        if allowsDragging {
+            arView.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap)))
+        }
 
         return arView
     }
@@ -809,6 +1088,17 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             return
         }
 
+        // 드래그 클램프 기준 바닥 사각형 (capturedRoom 셸이 있으면 그쪽 우선, 없으면 JSON 바닥)
+        if allowsDragging {
+            if let room = capturedRoom, let floor = room.floors.first {
+                coordinator.floorTransform = floor.transform
+                coordinator.floorHalfExtent = SIMD2(floor.dimensions.x / 2, floor.dimensions.y / 2)
+            } else if let floor = payload.floors?.first, let ft = floor.simdTransform, floor.dimensions.count >= 2 {
+                coordinator.floorTransform = ft
+                coordinator.floorHalfExtent = SIMD2(floor.dimensions[0] / 2, floor.dimensions[1] / 2)
+            }
+        }
+
         // ── capturedRoom이 없을 때만 JSON으로 방 구조 렌더링 ──────────────────
         if capturedRoom == nil {
             var allPos: [SIMD3<Float>] = []
@@ -847,6 +1137,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let worldPos = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
 
             var placed = false
+            var placedEntity: Entity? = nil
 
             // 1. usdc_url (USER_EDITED 버전: S3 presigned URL)
             if !placed, let urlStr = obj.usdcUrl, let remoteURL = URL(string: urlStr) {
@@ -859,6 +1150,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
                     anchor.addChild(loaded)
                     placed = true
+                    placedEntity = loaded
                     print("  ✅ \(obj.modelFileName ?? "") usdc_url 로드 성공")
                 } catch {
                     print("  ⚠️ usdc_url 로드 실패: \(error)")
@@ -874,6 +1166,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     if let furnitureTint { applyTint(to: loaded, color: furnitureTint) }
                     anchor.addChild(loaded)
                     placed = true
+                    placedEntity = loaded
                     print("  ✅ \(obj.category ?? "") (\(fileName)) 로컬 카탈로그 로드 성공")
                 } catch {
                     print("  ⚠️ \(obj.category ?? "") (\(fileName)) 로컬 로드 실패: \(error)")
@@ -893,6 +1186,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     if let furnitureTint { applyTint(to: loaded, color: furnitureTint) }
                     anchor.addChild(loaded)
                     placed = true
+                    placedEntity = loaded
                     print("  ✅ \(obj.category ?? "") (\(fileName)) 서버 카탈로그 로드 성공")
                 } catch {
                     print("  ⚠️ \(obj.category ?? "") (\(fileName)) 서버 카탈로그 로드 실패: \(error)")
@@ -905,6 +1199,13 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let box = makeFallbackBox(for: obj)
                 box.transform = Transform(matrix: matrix)
                 anchor.addChild(box)
+                placedEntity = box
+            }
+
+            // 드래그 모드: 히트테스트용 이름 + 콜리전 부여 (카탈로그 모델은 메쉬가 자식 노드일 수 있어 recursive)
+            if allowsDragging, let placedEntity {
+                placedEntity.name = "furniture_\(obj.identifier)"
+                placedEntity.generateCollisionShapes(recursive: true)
             }
         }
     }
@@ -1161,9 +1462,19 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
         var camera: PerspectiveCamera?          // 카메라 거리 동적 조정용
+        var allowsDragging: Bool = false
+        /// 바닥 사각형 기준 (드래그 클램프용)
+        var floorTransform: simd_float4x4?
+        var floorHalfExtent: SIMD2<Float>?
+
         private var lastScale: Float = 1.0
         private var currentScale: Float = 1.0
         private var lastRotation: Float = 0
+
+        private var draggedEntity: Entity?
+        private var dragPlaneY: Float = 0
+        private var dragOffset: SIMD3<Float> = .zero
+        private var isOrbiting = false
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
             if g.state == .began { lastScale = currentScale }
@@ -1178,11 +1489,106 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
         }
 
+        /// 가구를 탭하면 그 자리에서 90도씩 회전 (드래그 모드 전용).
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard allowsDragging, g.state == .ended, let arView else { return }
+            guard let hit = furnitureRoot(from: arView.entity(at: g.location(in: arView))) else { return }
+            hit.orientation *= simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+        }
+
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
-            let delta = Float(g.translation(in: arView).x) * 0.005
-            roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
-            g.setTranslation(.zero, in: arView)
+
+            guard allowsDragging else {
+                // 드래그 모드가 아니면 기존 동작 그대로 — 손가락 하나로 방 전체 회전.
+                let delta = Float(g.translation(in: arView).x) * 0.005
+                roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+                g.setTranslation(.zero, in: arView)
+                return
+            }
+
+            // 가구를 눌렀으면 그 가구를 바닥 평면 위에서 드래그, 빈 공간을 눌렀으면 방 전체를 회전.
+            let loc = g.location(in: arView)
+            switch g.state {
+            case .began:
+                if let hit = furnitureRoot(from: arView.entity(at: loc)) {
+                    draggedEntity = hit
+                    let worldPos = hit.position(relativeTo: nil)
+                    dragPlaneY = worldPos.y
+                    dragOffset = floorPoint(at: loc, planeY: dragPlaneY, in: arView).map { worldPos - $0 } ?? .zero
+                } else {
+                    draggedEntity = nil
+                    isOrbiting = true
+                }
+            case .changed:
+                if let draggedEntity {
+                    if let touchPoint = floorPoint(at: loc, planeY: dragPlaneY, in: arView) {
+                        draggedEntity.setPosition(touchPoint + dragOffset, relativeTo: nil)
+                        clampEntityToFloor(draggedEntity)
+                    }
+                } else if isOrbiting {
+                    let delta = Float(g.translation(in: arView).x) * 0.005
+                    roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+                    g.setTranslation(.zero, in: arView)
+                }
+            case .ended, .cancelled, .failed:
+                draggedEntity = nil
+                isOrbiting = false
+            default: break
+            }
+        }
+
+        /// 히트테스트로 잡힌 엔티티가 카탈로그 모델의 자식 메쉬일 수 있으므로,
+        /// "furniture_" 이름을 가진 조상까지 거슬러 올라가 실제로 옮길 루트 엔티티를 찾는다.
+        private func furnitureRoot(from entity: Entity?) -> Entity? {
+            var current = entity
+            while let e = current {
+                if e.name.hasPrefix("furniture_") { return e }
+                current = e.parent
+            }
+            return nil
+        }
+
+        /// 화면 좌표 → 카메라 레이와 y=planeY 수평면의 교점 (월드 좌표)
+        private func floorPoint(at location: CGPoint, planeY: Float, in arView: ARView) -> SIMD3<Float>? {
+            guard let ray = arView.ray(through: location) else { return nil }
+            guard abs(ray.direction.y) > 0.0001 else { return nil }
+            let t = (planeY - ray.origin.y) / ray.direction.y
+            guard t > 0 else { return nil }
+            return ray.origin + ray.direction * t
+        }
+
+        /// 엔티티의 실제 렌더링 바운드가 바닥 사각형을 벗어난 만큼 다시 안쪽으로 밀어넣는다
+        /// — 근사 마진 대신 실측이라 카탈로그 모델의 피벗이 중심이 아니어도 정확함.
+        private func clampEntityToFloor(_ entity: Entity) {
+            guard let floorTransform, let floorHalfExtent else { return }
+            let bounds = entity.visualBounds(relativeTo: nil)
+            let inv = floorTransform.inverse
+
+            var minLocalX = Float.greatestFiniteMagnitude, maxLocalX = -Float.greatestFiniteMagnitude
+            var minLocalY = Float.greatestFiniteMagnitude, maxLocalY = -Float.greatestFiniteMagnitude
+            for cx in [bounds.min.x, bounds.max.x] {
+                for cy in [bounds.min.y, bounds.max.y] {
+                    for cz in [bounds.min.z, bounds.max.z] {
+                        let local = inv * SIMD4<Float>(cx, cy, cz, 1)
+                        minLocalX = min(minLocalX, local.x); maxLocalX = max(maxLocalX, local.x)
+                        minLocalY = min(minLocalY, local.y); maxLocalY = max(maxLocalY, local.y)
+                    }
+                }
+            }
+
+            var dx: Float = 0
+            if maxLocalX > floorHalfExtent.x { dx = floorHalfExtent.x - maxLocalX }
+            else if minLocalX < -floorHalfExtent.x { dx = -floorHalfExtent.x - minLocalX }
+            var dy: Float = 0
+            if maxLocalY > floorHalfExtent.y { dy = floorHalfExtent.y - maxLocalY }
+            else if minLocalY < -floorHalfExtent.y { dy = -floorHalfExtent.y - minLocalY }
+            guard dx != 0 || dy != 0 else { return }
+
+            let worldDelta4 = floorTransform * SIMD4<Float>(dx, dy, 0, 0)
+            let worldDelta = SIMD3(worldDelta4.x, worldDelta4.y, worldDelta4.z)
+            let currentWorld = entity.position(relativeTo: nil)
+            entity.setPosition(currentWorld + worldDelta, relativeTo: nil)
         }
     }
 }

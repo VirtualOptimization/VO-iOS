@@ -186,7 +186,7 @@ struct InquiryResultView: View {
         case .loaded(let versionDetail):
             FurnitureRealityKitView(detail: versionDetail, isTransparent: isTransparent,
                                     wallColor: material.wallColor, floorColor: material.floorColor,
-                                    furnitureTint: material.furnitureColor)
+                                    furnitureTint: material.furnitureColor, allowsDragging: true)
                 .id("\(versionDetail.effectiveDataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")-\(isTransparent)-\(material.id)")
                 .ignoresSafeArea()
         case .error:

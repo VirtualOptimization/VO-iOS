@@ -41,18 +41,19 @@ extension ScanViewModel {
         // PhotogrammetrySession은 메인 스레드에서 실행하면 크래시 → Task.detached
         furnitureGenerationTask = Task.detached { [weak self] in
             do {
-                await MainActor.run { self?.furnitureProgressText = "가구 치수를 측정하고 있어요..." }
-                let dims = try await Self.measureDimensions(imagesDirectory: imagesDirectory) { progress in
-                    await MainActor.run { self?.furnitureProgressText = progress }
-                }
-
                 guard let imageData = Self.representativeImageData(in: imagesDirectory) else {
                     throw FurnitureRescaleError.loadFailed
                 }
 
-                let rawURL = try await MeshyService().process(imageData: imageData) { progress in
-                    await MainActor.run { self?.furnitureProgressText = progress }
+                // 치수 측정(온디바이스)과 Meshy AI 생성(서버)은 서로 다른 입력을 쓰는 독립적인 작업이라
+                // 순차로 기다릴 필요 없이 동시에 진행 — 전체 대기 시간이 둘 중 더 오래 걸리는 쪽으로 줄어듦.
+                async let dimsTask = Self.measureDimensions(imagesDirectory: imagesDirectory) { progress in
+                    await MainActor.run { self?.furnitureProgressText = "치수 측정: \(progress)" }
                 }
+                async let meshyTask = MeshyService().process(imageData: imageData) { progress in
+                    await MainActor.run { self?.furnitureProgressText = "3D 생성: \(progress)" }
+                }
+                let (dims, rawURL) = try await (dimsTask, meshyTask)
 
                 await MainActor.run { self?.furnitureProgressText = "실측 치수에 맞춰 크기 조정 중..." }
                 let finalURL = try Self.rescaledUSDZ(
