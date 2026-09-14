@@ -8,6 +8,7 @@ extension ScanViewModel {
     func saveAndUpload(room: CapturedRoom) {
         phase = .uploading(room)
         uploadError = nil
+        savedOriginalDetail = nil
         Task {
             do {
                 guard let accessToken = KeychainTokenStore.get(.accessToken) else {
@@ -112,12 +113,28 @@ extension ScanViewModel {
 
                 // 1. POST /api/rooms/{room_id}/complete → 업로드 완료 확인 + 파이프라인 트리거
                 print("최적화 요청 – roomId=\(roomId), uploadedKeys=\(pendingUploadedKeys)")
-                let resp = try await optimizer.completeScanUpload(roomId: roomId, uploadedKeys: pendingUploadedKeys, accessToken: accessToken)
-                print("pipelineStarted=\(resp.pipelineStarted)")
+                var pipelineStarted: Bool
+                do {
+                    let resp = try await optimizer.completeScanUpload(roomId: roomId, uploadedKeys: pendingUploadedKeys, accessToken: accessToken)
+                    print("pipelineStarted=\(resp.pipelineStarted)")
+                    pipelineStarted = resp.pipelineStarted
+                } catch let err as NSError where err.code == NSURLErrorTimedOut {
+                    // 서버는 /complete 응답 전에 DB 저장(원본 버전 생성)을 먼저 커밋하고 나서
+                    // 최적화 파이프라인을 동기로 돌리기 때문에, 클라이언트가 타임아웃으로 응답을
+                    // 못 받아도 저장 자체는 이미 끝나 있을 수 있다 — 바로 실패 처리하지 말고
+                    // 버전 목록을 다시 조회해서 원본이 실제로 저장됐는지 확인한 뒤 이어간다.
+                    print("⏰ /complete 타임아웃 – 서버 저장 여부 확인 중...")
+                    let detail = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
+                    guard detail.versions.contains(where: { $0.versionType.lowercased() == "original" }) else {
+                        throw err   // 저장 자체가 안 된 경우 – 진짜 실패
+                    }
+                    print("✅ 서버에는 이미 저장돼 있음 – 파이프라인이 진행 중일 수 있으니 폴링으로 이어감")
+                    pipelineStarted = true
+                }
 
                 // pipelineStarted=false → 파이프라인 미시작 (BE ARN 미설정 등)
                 // 폴링해도 optimized가 /versions에 절대 안 뜨므로 즉시 복귀
-                guard resp.pipelineStarted else {
+                guard pipelineStarted else {
                     print("pipelineStarted=false – BE의 Step Functions ARN 설정 필요")
                     optimizeError = "최적화 파이프라인이 서버에서 아직 시작되지 않았어요.\n(서버 설정 문제일 수 있어요 — 잠시 후 다시 시도해주세요)"
                     phase = .uploadComplete(room, roomId: roomId)
@@ -141,6 +158,23 @@ extension ScanViewModel {
                 // 에러 시 UploadCompleteView로 복귀
                 optimizeError = "최적화 요청에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
                 phase = .uploadComplete(room, roomId: roomId)
+            }
+        }
+    }
+
+    /// 최적화 없이 "저장하기"만 눌렀을 때 — 원본 버전만 서버에 확정하고(파이프라인은 안 돌림)
+    /// 색상이 반영된 서버 카탈로그로 조회할 수 있도록 방금 확정된 원본 버전 상세를 받아온다.
+    func finalizeSave(roomId: Int) {
+        guard let accessToken = KeychainTokenStore.get(.accessToken) else { return }
+        Task {
+            do {
+                _ = try await optimizer.completeScanUpload(
+                    roomId: roomId, uploadedKeys: pendingUploadedKeys, accessToken: accessToken, runPipeline: false)
+                let detail = try await optimizer.fetchVersionDetail(roomId: roomId, versionType: "origin", accessToken: accessToken)
+                savedOriginalDetail = detail
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("⚠️ 저장 확정 실패 (색상 반영된 뷰어로 전환 못함): \(error)")
             }
         }
     }

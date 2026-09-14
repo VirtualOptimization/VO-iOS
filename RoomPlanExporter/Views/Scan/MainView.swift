@@ -82,79 +82,39 @@ struct MainView: View {
     // MARK: - Cards
 
     private var cards: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // 왼쪽 카드 (공간 촬영) — 오른쪽 두 카드 합친 높이
-            Button { vm.showGuide() } label: {
-                VStack(alignment: .leading, spacing: 0) {
+        // 가구 등록/가구 목록 기능을 걷어내고 나니 진입점이 "공간 촬영" 하나뿐이라,
+        // 정사각 타일 대신 가로로 넓은 프라이머리 CTA 배너 하나로 재구성.
+        Button { vm.showGuide() } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.voBlue.opacity(0.12))
+                        .frame(width: 52, height: 52)
                     Image(systemName: "camera.viewfinder")
-                        .font(.title3)
+                        .font(.title2)
                         .foregroundStyle(Color.voBlue)
-                    Spacer()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("공간 촬영")
-                            .font(.semiBold14)
-                            .foregroundStyle(.primary)
-                        Text("방을 스캔하고\n최적의 배치를 확인하세요!")
-                            .font(.regular11)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .voGlassCardFillingParent(cornerRadius: 14)
-            }
-            .buttonStyle(.plain)
 
-            // 오른쪽 (가구 등록 + 가구 목록) — 높이를 왼쪽 카드와 맞춤
-            VStack(spacing: 12) {
-                Button { vm.showFurnitureAddMethodPicker() } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Image(systemName: "cabinet.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color.voBlue)
-                        Spacer()
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("+ 가구 등록")
-                                .font(.semiBold14)
-                                .foregroundStyle(.primary)
-                            Text("고민 중인 가구를\n등록해보세요")
-                                .font(.regular11)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .voGlassCardFillingParent(cornerRadius: 14)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("공간 촬영")
+                        .font(.semiBold16)
+                        .foregroundStyle(.primary)
+                    Text("방을 스캔하고 최적의 배치를 확인하세요!")
+                        .font(.regular12)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
 
-                Button { vm.showFurnitureList() } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Image(systemName: "square.grid.2x2.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color.voBlue)
-                        Spacer()
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("가구 목록")
-                                .font(.semiBold14)
-                                .foregroundStyle(.primary)
-                            Text("등록한 가구들을\n확인해보세요")
-                                .font(.regular11)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .voGlassCardFillingParent(cornerRadius: 14)
-                }
-                .buttonStyle(.plain)
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
             }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .voGlassCardFillingParent(cornerRadius: 16)
         }
-        // 전체 카드 영역 높이 고정 → 왼쪽 1장 = 오른쪽 2장 (폰트 확대에 맞춰 여유있게 조정)
-        .frame(height: 210)
+        .buttonStyle(.plain)
     }
 
     // MARK: - 내 공간

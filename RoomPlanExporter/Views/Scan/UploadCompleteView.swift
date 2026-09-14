@@ -10,8 +10,6 @@ struct UploadCompleteView: View {
     @FocusState private var isFocused: Bool
     @State private var saved = false
 
-    @State private var isTransparent = false
-    @State private var material = RoomMaterial.presets[0]
 
     private var spaceId: UUID? {
         vm.savedSpaces.first { $0.roomId == roomId }?.id
@@ -57,10 +55,10 @@ struct UploadCompleteView: View {
                         Text(saved ? "저장됨" : "저장하기")
                     }
                     .font(.semiBold12)
-                    .foregroundStyle(saved ? .green : Color.voBlue)
+                    .foregroundStyle(Color.voBlue)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .background((saved ? Color.green : Color.voBlue).opacity(0.12), in: Capsule())
+                    .background(Color.voBlue.opacity(0.12), in: Capsule())
                 }
                 .animation(.easeInOut(duration: 0.2), value: saved)
             }
@@ -75,20 +73,9 @@ struct UploadCompleteView: View {
 
             Divider()
 
-            // 3D 뷰어
-            RoomViewerView(capturedRoom: room, isTransparent: isTransparent,
-                           wallColor: material.wallColor, floorColor: material.floorColor,
-                           furnitureTint: material.furnitureColor, colorCustomizable: true)
-                .id("\(isTransparent)-\(material.id)")
+            // 3D 뷰어 — 저장 확정 전엔 로컬 렌더러, 확정되면 서버 색상이 반영된 렌더러로 전환
+            ServerOriginalPreview(roomId: roomId, vm: vm)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottomTrailing) {
-                    RoomStyleToggle(isTransparent: $isTransparent)
-                        .padding(12)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    MaterialSwatchPicker(selected: $material)
-                        .padding(12)
-                }
 
             // 하단 버튼
             VStack(spacing: 12) {
@@ -108,7 +95,16 @@ struct UploadCompleteView: View {
             .padding(.vertical, 20)
         }
         .contentShape(Rectangle())
-        .onTapGesture { isFocused = false }
+        // onTapGesture는 버튼과 같은 제스처 우선순위를 다퉈서 탭 반응이 늦어지므로
+        // simultaneousGesture로 버튼 탭을 막지 않게 처리
+        .simultaneousGesture(TapGesture().onEnded { isFocused = false })
+        // 업로드 직후 화면이 뜨자마자 원본 버전을 확정해서 서버 색상이 반영된 뷰어로 바로 전환
+        // (이름 저장 버튼을 따로 눌러야만 색이 뜨는 건 사용자 입장에서 헷갈림)
+        .onAppear {
+            if vm.savedOriginalDetail == nil {
+                vm.finalizeSave(roomId: roomId)
+            }
+        }
         .alert("최적화 실패", isPresented: .constant(vm.optimizeError != nil), actions: {
             Button("확인") { vm.optimizeError = nil }
         }, message: {
@@ -121,5 +117,8 @@ struct UploadCompleteView: View {
         guard !trimmed.isEmpty, let spaceId else { return }
         vm.updateSpaceName(trimmed, id: spaceId)
         saved = true
+        if vm.savedOriginalDetail == nil {
+            vm.finalizeSave(roomId: roomId)
+        }
     }
 }

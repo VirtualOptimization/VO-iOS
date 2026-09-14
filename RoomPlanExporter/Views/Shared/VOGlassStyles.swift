@@ -32,4 +32,27 @@ extension View {
         voGlassCard(cornerRadius: cornerRadius)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    /// 흰 배경의 원형 글라스 아이콘 버튼 배경 (예: 3D 뷰어 위에 뜨는 작은 "?" 도움말 버튼).
+    @ViewBuilder
+    func voGlassCircle() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.tint(.white), in: Circle())
+        } else {
+            self.background(Color.white, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+        }
+    }
+
+    /// voGlassCircle과 같은 흰 틴트 글라스를 카드형(둥근 사각형)으로 — 텍스트를 담는
+    /// 안내 박스처럼, 완전 클리어한 글라스보다 배경에 덜 묻혀 가독성을 유지해야 하는 곳에서 사용.
+    @ViewBuilder
+    func voGlassCardWhite(cornerRadius: CGFloat = 16) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.tint(.white), in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            self.background(Color.white, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        }
+    }
 }

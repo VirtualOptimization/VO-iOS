@@ -11,20 +11,23 @@ struct InquiryResultView: View {
         self.detail = detail
         self._vm = ObservedObject(wrappedValue: vm)
 
-        // USER_EDITED 중 version_no가 가장 높은 것 우선 선택
+        // USER_EDITED 중 version_no가 가장 높은 것 우선 선택, 없으면 원본(ORIGINAL)부터 보여준다
         let userEditedVersions = detail.versions.filter { $0.versionType.uppercased() == "USER_EDITED" }
         if let best = userEditedVersions.max(by: { ($0.versionNo ?? 0) < ($1.versionNo ?? 0) }),
            let idx = detail.versions.firstIndex(where: { $0.versionId == best.versionId }) {
             _selectedIndex = State(initialValue: idx)
-        } else if let idx = detail.versions.firstIndex(where: { $0.versionType.uppercased() == "OPTIMIZED" }) {
+        } else if let idx = detail.versions.firstIndex(where: { $0.versionType.uppercased() == "ORIGINAL" }) {
             _selectedIndex = State(initialValue: idx)
         } else {
             _selectedIndex = State(initialValue: 0)
         }
     }
     @State private var versionToDelete: ScanVersion? = nil
-    @State private var isTransparent: Bool = false
-    @State private var material = RoomMaterial.presets[0]
+    private enum ScreenMode { case normal, assistant, edit }
+    @State private var mode: ScreenMode = .normal
+    @State private var assistantVM: AssistantViewModel?
+    @State private var showVersionSheet = false
+    @State private var showActionHints = false
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
@@ -53,13 +56,22 @@ struct InquiryResultView: View {
         return false
     }
 
+    /// AI 배치 상담이 근거로 쓸 현재 버전의 방 데이터 JSON URL
+    private var currentDataURL: String? {
+        guard case .loaded(let versionDetail) = viewerState else { return nil }
+        return versionDetail.effectiveDataUrl
+    }
+
     // MARK: Body
 
     var body: some View {
         VStack(spacing: 0) {
-            banner
+            if mode == .normal {
+                banner
+            }
 
-            // 3D 뷰어 (메인 영역)
+            // 3D 뷰어 (메인 영역) — 채팅 모드에서도 계속 같은 뷰가 떠 있어서, 대화 중 가구를
+            // 직접 드래그하거나(F02 대안) 채팅이 숨긴 가구를(F03) 그 자리에서 바로 확인할 수 있음
             ZStack {
                 Color(.secondarySystemBackground)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -67,26 +79,93 @@ struct InquiryResultView: View {
                 viewerContent
             }
             .overlay(alignment: .bottomTrailing) {
-                RoomStyleToggle(isTransparent: $isTransparent)
-                    .padding(12)
+                if mode == .edit {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if showActionHints {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("가구를 탭해서 선택 → 오른쪽 핸들을 드래그해서 이동")
+                                Text("다시 탭하면 90도 회전")
+                            }
+                            .font(.regular11)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .voGlassCardWhite(cornerRadius: 14)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.voBlue, lineWidth: 1.5))
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                        Button { withAnimation(.easeInOut(duration: 0.15)) { showActionHints.toggle() } } label: {
+                            Image(systemName: "questionmark")
+                                .font(.semiBold12)
+                                .foregroundStyle(Color.voBlue)
+                                .frame(width: 32, height: 32)
+                                .voGlassCircle()
+                        }
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                }
             }
-            .overlay(alignment: .bottomLeading) {
-                MaterialSwatchPicker(selected: $material)
+            .overlay(alignment: .topLeading) {
+                if mode != .normal {
+                    Button { exitSpecialMode() } label: {
+                        Image(systemName: "xmark")
+                            .font(.semiBold14)
+                            .foregroundStyle(.primary)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
                     .padding(12)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if mode == .normal, currentDataURL != nil {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Button { enterAssistantMode() } label: {
+                            Label("AI 배치 상담", systemImage: "bubble.left.and.bubble.right.fill")
+                                .font(.semiBold12)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        Button { mode = .edit } label: {
+                            Label("가구 편집", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                                .font(.semiBold12)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
+                    .padding(12)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if mode == .assistant, let assistantVM {
+                    AssistantPanelView(vm: assistantVM)
+                }
             }
 
-            Divider()
+            if mode == .normal {
+                Divider()
 
-            // 버전 리스트 패널
-            versionListPanel
+                // 버전은 늘 펼쳐두지 않고 필요할 때만 시트로 — 3D 뷰 영역을 더 넓게 씀
+                HStack(spacing: 10) {
+                    Button { showVersionSheet = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: selectedDisplay?.version.systemIcon ?? "doc")
+                            Text(selectedDisplay?.version.displayName ?? "버전 선택")
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                    }
+                    .buttonStyle(VOOutlineButtonStyle())
 
-            Divider()
-
-            // 메인으로 돌아가기
-            Button("메인으로") { vm.retake() }
-                .buttonStyle(VOFilledButtonStyle())
-                .padding(.horizontal, 50)
+                    Button("메인으로") { vm.retake() }
+                        .buttonStyle(VOFilledButtonStyle())
+                }
+                .padding(.horizontal, 20)
                 .padding(.vertical, 10)
+            }
         }
         .overlay {
             if showDeleteAlert {
@@ -138,8 +217,12 @@ struct InquiryResultView: View {
         }
         .onAppear { loadViewer() }
         .onChange(of: selectedIndex) { _, _ in
-            isTransparent = false
             loadViewer()
+        }
+        .sheet(isPresented: $showVersionSheet) {
+            versionListPanel
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .alert("삭제 실패", isPresented: .constant(vm.inquiryError != nil), actions: {
             Button("확인") { vm.inquiryError = nil }
@@ -184,10 +267,10 @@ struct InquiryResultView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         case .loaded(let versionDetail):
-            FurnitureRealityKitView(detail: versionDetail, isTransparent: isTransparent,
-                                    wallColor: material.wallColor, floorColor: material.floorColor,
-                                    furnitureTint: material.furnitureColor, allowsDragging: true)
-                .id("\(versionDetail.effectiveDataUrl ?? versionDetail.usdzUrl ?? "\(selectedIndex)")-\(isTransparent)-\(material.id)")
+            FurnitureRealityKitView(detail: versionDetail, isTransparent: true,
+                                    editMode: mode == .edit,
+                                    hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [])
+                .id(versionDetail.renderingID)
                 .ignoresSafeArea()
         case .error:
             VStack(spacing: 12) {
@@ -204,30 +287,53 @@ struct InquiryResultView: View {
     // MARK: 버전 리스트 패널
 
     private var versionListPanel: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                Spacer().frame(height: 6)
-                ForEach(Array(displayVersions.enumerated()), id: \.offset) { index, dv in
-                    VersionRow(
-                        version: dv.version,
-                        isSelected: index == selectedIndex && !dv.isPlaceholder,
-                        isPlaceholder: dv.isPlaceholder,
-                        onSelect: {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedIndex = index }
-                        },
-                        onDelete: {
-                            versionToDelete = dv.version
-                            showDeleteAlert = true
-                        }
-                    )
-                    if index < displayVersions.count - 1 {
-                        Divider().padding(.leading, 54)
+        VStack(spacing: 0) {
+            Text("버전 선택")
+                .font(.title3.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.top, 28)
+                .padding(.bottom, 20)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 10) {
+                    ForEach(Array(displayVersions.enumerated()), id: \.offset) { index, dv in
+                        VersionRow(
+                            version: dv.version,
+                            isSelected: index == selectedIndex && !dv.isPlaceholder,
+                            isPlaceholder: dv.isPlaceholder,
+                            onSelect: {
+                                withAnimation(.easeInOut(duration: 0.2)) { selectedIndex = index }
+                                showVersionSheet = false
+                            },
+                            onDelete: {
+                                versionToDelete = dv.version
+                                showDeleteAlert = true
+                            }
+                        )
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
             }
         }
-        .frame(maxHeight: 140)
         .background(Color(.systemBackground))
+    }
+
+    // MARK: 화면 모드 전환
+
+    private func enterAssistantMode() {
+        guard let currentDataURL else { return }
+        assistantVM = AssistantViewModel(dataURLString: currentDataURL)
+        withAnimation(.easeInOut(duration: 0.2)) { mode = .assistant }
+    }
+
+    /// 채팅/가구 편집 모드 둘 다 이 버튼 하나로 나간다.
+    private func exitSpecialMode() {
+        assistantVM?.showAllFurniture()
+        withAnimation(.easeInOut(duration: 0.2)) { mode = .normal }
+        assistantVM = nil
+        showActionHints = false
     }
 
     // MARK: 버전 상세 다운로드 & 캐시
@@ -324,7 +430,7 @@ private struct VersionRow: View {
                 .frame(width: 20)
 
             // 이름 + 날짜
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text(version.displayName)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -346,7 +452,7 @@ private struct VersionRow: View {
 
                 if let date = version.createdAt {
                     Text(shortDate(date))
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -365,9 +471,13 @@ private struct VersionRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(isSelected ? Color.voBlue.opacity(0.06) : Color.clear)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .frame(minHeight: 72)
+        .background(
+            isSelected ? Color.voBlue.opacity(0.08) : Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
         .contentShape(Rectangle())
         .onTapGesture { if !isPlaceholder { onSelect() } }
     }

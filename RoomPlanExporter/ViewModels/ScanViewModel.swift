@@ -67,6 +67,9 @@ final class ScanViewModel: ObservableObject {
     @Published var savedSpaces: [SavedSpace] = []
     @Published var roomStatus: [Int: MyRoomSummary] = [:]   // roomId -> 서버 버전 상태 (GET /api/rooms)
     @Published var furnitureProgressText: String = ""
+    /// 최적화 없이 "저장하기"만 눌렀을 때 서버에 확정된 원본 버전 — 채워지면 UploadCompleteView가
+    /// 로컬 렌더러 대신 이걸로 서버 색상이 반영된 가구를 보여준다.
+    @Published var savedOriginalDetail: RoomVersionDetail? = nil
 
     let optimizer = RoomOptimizerService()
 

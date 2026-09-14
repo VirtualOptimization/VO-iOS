@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AB70000000000000AB700000 /* AssistantService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB70000000000000AB700001 /* AssistantService.swift */; };
+		AB71000000000000AB710000 /* RoomFitCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB71000000000000AB710001 /* RoomFitCalculator.swift */; };
+		AB72000000000000AB720000 /* AssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB72000000000000AB720001 /* AssistantViewModel.swift */; };
+		AB73000000000000AB730000 /* AssistantPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB73000000000000AB730001 /* AssistantPanelView.swift */; };
 		070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */; };
 		070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
 		070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
@@ -44,7 +48,6 @@
 		AB44000000000000AB440000 /* FurnitureModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB44000000000000AB440001 /* FurnitureModelService.swift */; };
 		AB58000000000000AB580000 /* TripoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB58000000000000AB580001 /* TripoService.swift */; };
 		AB59000000000000AB590000 /* MeshyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB59000000000000AB590001 /* MeshyService.swift */; };
-		AB45000000000000AB450000 /* CatalogModelCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB45000000000000AB450001 /* CatalogModelCache.swift */; };
 		AB46000000000000AB460000 /* ScanViewModel+Furniture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB46000000000000AB460001 /* ScanViewModel+Furniture.swift */; };
 		AB47000000000000AB470000 /* ScanViewModel+RoomScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB47000000000000AB470001 /* ScanViewModel+RoomScan.swift */; };
 		AB48000000000000AB480000 /* ScanViewModel+Inquiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */; };
@@ -74,6 +77,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AB70000000000000AB700001 /* AssistantService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantService.swift; sourceTree = "<group>"; };
+		AB71000000000000AB710001 /* RoomFitCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomFitCalculator.swift; sourceTree = "<group>"; };
+		AB72000000000000AB720001 /* AssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViewModel.swift; sourceTree = "<group>"; };
+		AB73000000000000AB730001 /* AssistantPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPanelView.swift; sourceTree = "<group>"; };
 		070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureViewController.swift; sourceTree = "<group>"; };
 		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
 		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
@@ -126,7 +133,6 @@
 		AB44000000000000AB440001 /* FurnitureModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureModelService.swift; sourceTree = "<group>"; };
 		AB58000000000000AB580001 /* TripoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripoService.swift; sourceTree = "<group>"; };
 		AB59000000000000AB590001 /* MeshyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshyService.swift; sourceTree = "<group>"; };
-		AB45000000000000AB450001 /* CatalogModelCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogModelCache.swift; sourceTree = "<group>"; };
 		AB46000000000000AB460001 /* ScanViewModel+Furniture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+Furniture.swift"; sourceTree = "<group>"; };
 		AB47000000000000AB470001 /* ScanViewModel+RoomScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+RoomScan.swift"; sourceTree = "<group>"; };
 		AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+Inquiry.swift"; sourceTree = "<group>"; };
@@ -183,8 +189,17 @@
 				AB51000000000000AB510000 /* Scan */,
 				AB52000000000000AB520000 /* Furniture */,
 				AB53000000000000AB530000 /* Shared */,
+				AB74000000000000AB740000 /* Assistant */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		AB74000000000000AB740000 /* Assistant */ = {
+			isa = PBXGroup;
+			children = (
+				AB73000000000000AB730001 /* AssistantPanelView.swift */,
+			);
+			path = Assistant;
 			sourceTree = "<group>";
 		};
 		AB50000000000000AB500000 /* Auth */ = {
@@ -248,6 +263,7 @@
 				AB48000000000000AB480001 /* ScanViewModel+Inquiry.swift */,
 				AB49000000000000AB490001 /* ScanViewModel+RoomExport.swift */,
 				AB35000000000000AB350001 /* AuthViewModel.swift */,
+				AB72000000000000AB720001 /* AssistantViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -268,9 +284,10 @@
 				AB42000000000000AB420001 /* KeychainTokenStore.swift */,
 				AB43000000000000AB430001 /* AuthService.swift */,
 				AB44000000000000AB440001 /* FurnitureModelService.swift */,
-				AB45000000000000AB450001 /* CatalogModelCache.swift */,
 				AB58000000000000AB580001 /* TripoService.swift */,
 				AB59000000000000AB590001 /* MeshyService.swift */,
+				AB70000000000000AB700001 /* AssistantService.swift */,
+				AB71000000000000AB710001 /* RoomFitCalculator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -500,11 +517,14 @@
 				AB44000000000000AB440000 /* FurnitureModelService.swift in Sources */,
 				AB58000000000000AB580000 /* TripoService.swift in Sources */,
 				AB59000000000000AB590000 /* MeshyService.swift in Sources */,
-				AB45000000000000AB450000 /* CatalogModelCache.swift in Sources */,
 				AB46000000000000AB460000 /* ScanViewModel+Furniture.swift in Sources */,
 				AB47000000000000AB470000 /* ScanViewModel+RoomScan.swift in Sources */,
 				AB48000000000000AB480000 /* ScanViewModel+Inquiry.swift in Sources */,
 				AB49000000000000AB490000 /* ScanViewModel+RoomExport.swift in Sources */,
+				AB70000000000000AB700000 /* AssistantService.swift in Sources */,
+				AB71000000000000AB710000 /* RoomFitCalculator.swift in Sources */,
+				AB72000000000000AB720000 /* AssistantViewModel.swift in Sources */,
+				AB73000000000000AB730000 /* AssistantPanelView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -36,6 +36,8 @@
 	<string>$(TRIPO_API_KEY)</string>
 	<key>MeshyAPIKey</key>
 	<string>$(MESHY_API_KEY)</string>
+	<key>AnthropicAPIKey</key>
+	<string>$(ANTHROPIC_API_KEY)</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>This app does not use calendar access.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

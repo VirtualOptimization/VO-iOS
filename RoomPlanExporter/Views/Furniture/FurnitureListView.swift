@@ -46,7 +46,9 @@ struct FurnitureListView: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { commitEdit() }
+                // onTapGesture는 버튼/가구 셀 탭과 우선순위를 다퉈서 반응이 늦어지므로
+                // simultaneousGesture로 다른 탭을 막지 않게 처리
+                .simultaneousGesture(TapGesture().onEnded { commitEdit() })
             }
         }
         .overlay(alignment: .topTrailing) {

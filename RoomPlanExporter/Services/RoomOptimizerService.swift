@@ -65,32 +65,6 @@ struct CompleteUploadResponse: Codable {
     }
 }
 
-/// GET /rooms/catalog/models 응답의 개별 모델
-struct CatalogModel: Codable, Identifiable {
-    var id: Int { modelId }
-    let modelId:       Int
-    let modelKey:      String
-    let name:          String
-    let furnitureType: String
-    let usdcUrl:       String
-    let glbUrl:        String?
-    let width, depth, height: Double
-
-    enum CodingKeys: String, CodingKey {
-        case modelId       = "model_id"
-        case modelKey      = "model_key"
-        case name
-        case furnitureType = "furniture_type"
-        case usdcUrl       = "usdc_url"
-        case glbUrl        = "glb_url"
-        case width, depth, height
-    }
-}
-
-private struct CatalogModelsResponse: Decodable {
-    let models: [CatalogModel]
-}
-
 /// GET /api/rooms 응답의 개별 항목 – 로그인 사용자의 공간 + 버전 상태 요약
 struct MyRoomSummary: Codable, Identifiable {
     var id: Int { roomId }
@@ -189,7 +163,7 @@ struct ScanDetail: Codable {
 }
 
 /// 버전 상세 응답 (신: layout_json_url / 구: data_url 둘 다 지원)
-struct RoomVersionDetail: Codable {
+struct RoomVersionDetail: Decodable {
     let usdzUrl:         String?
     let usdzEmptyUrl:    String?
     let glbUrl:          String?
@@ -198,6 +172,14 @@ struct RoomVersionDetail: Codable {
     let dataUrl:         String?           // 구버전 호환 (optimized 폴링용)
     let unityDataUrl:    String?           // 구버전 호환
     let modelUrls:       [String: String]?
+    // model_key(전체 경로) → 재질/색상 반영된 usdz presigned URL. layout_json_url 파일 자체에는
+    // 오브젝트별 usdz_url이 안 들어있는 경우가 많아, 이 딕셔너리를 model_key로 조회하는 게
+    // 실질적인 기본 경로다 (glb는 RealityKit이 못 읽음 — noImporter).
+    let modelUsdzUrls:   [String: String]?
+    // layout_json_url 파일은 static이라(원본은 애초에 model_key가 없고, 예전에 최적화된 방은
+    // 옛날 매핑 로직으로 박제된 값을 그대로 들고 있음) 신뢰할 수 없다. ios_objects는 요청마다
+    // 서버가 현재 코드로 새로 계산해서 usdz_url까지 채워주므로 이게 실질적인 진짜 소스다.
+    let iosObjects:      [RoomDataPayload.RoomObject]?
 
     enum CodingKeys: String, CodingKey {
         case usdzUrl       = "usdz_url"
@@ -208,10 +190,36 @@ struct RoomVersionDetail: Codable {
         case dataUrl       = "data_url"
         case unityDataUrl  = "unity_data_url"
         case modelUrls     = "model_urls"
+        case modelUsdzUrls = "model_usdz_urls"
+        case iosObjects    = "ios_objects"
     }
 
     /// 렌더링에 사용할 iOS JSON URL (신규 우선, 구버전 폴백)
     var effectiveDataUrl: String? { layoutJsonUrl ?? dataUrl }
+
+    /// Match full catalog keys first. A basename fallback is safe only when unique.
+    func catalogUSDZURL(modelKey: String?, filename: String?) -> String? {
+        let urls = modelUsdzUrls ?? [:]
+        if let modelKey, let exact = urls[modelKey], !exact.isEmpty { return exact }
+        guard let name = (modelKey ?? filename)?.split(separator: "/").last else { return nil }
+        let matches = urls.filter { $0.key.split(separator: "/").last == name && !$0.value.isEmpty }
+        return matches.count == 1 ? matches.first?.value : nil
+    }
+
+    /// Recreate the scene when refreshed asset URLs change, even for the same layout.
+    var renderingID: String {
+        var parts: [String] = [effectiveDataUrl ?? "", usdzUrl ?? ""]
+        for (key, value) in (modelUsdzUrls ?? [:]).sorted(by: { $0.key < $1.key }) {
+            parts.append(key)
+            parts.append(value)
+        }
+        for object in iosObjects ?? [] {
+            parts.append(object.identifier)
+            parts.append(object.usdzUrl ?? "")
+            parts.append(object.usdcUrl ?? "")
+        }
+        return parts.joined(separator: "|")
+    }
 }
 
 /// room_data.json / room_data.roomplan_optimized.json 파싱 모델
@@ -225,8 +233,13 @@ struct RoomDataPayload: Decodable {
     struct RoomObject: Decodable {
         let identifier:    String    // 구: "identifier" / 신: "id"
         let category:      String?   // 구 포맷에만 존재
-        let modelFileName: String?   // 구: "modelFileName" / 신: "modelKey"
+        let modelFileName: String?   // 짧은 파일명 — 로컬 RoomPlanCatalog.bundle 검색용 (파일명만 매칭)
+        let modelKey:      String?   // "Category/Variant/파일명" 전체 경로 — RoomVersionDetail.modelUsdzUrls 조회 키
         let usdcUrl:       String?   // 신: "usdc_url" (S3 presigned, USER_EDITED 버전)
+        let usdzUrl:       String?   // 오브젝트별 presigned USDZ (있으면 최우선) — 실제로는 layout_json_url
+                                      // 파일에 이 필드가 없는 경우가 많아, modelKey로 RoomVersionDetail.modelUsdzUrls를
+                                      // 조회하는 경로가 사실상의 기본 경로다.
+                                      // glb_url은 RealityKit이 못 읽어서(noImporter) 반드시 usdz를 써야 함.
         let center:        [Float]?  // 구 포맷에만 존재
         let dimensions:    [Float]?
         let transform:     [[Float]]
@@ -239,8 +252,10 @@ struct RoomDataPayload: Decodable {
                 identifier = try c.decode(String.self, forKey: .id)
             }
             category      = try? c.decode(String.self, forKey: .category)
-            modelFileName = (try? c.decode(String.self, forKey: .modelFileName)) ?? (try? c.decode(String.self, forKey: .modelKey))
+            modelKey      = try? c.decode(String.self, forKey: .modelKey)
+            modelFileName = (try? c.decode(String.self, forKey: .modelFileName)) ?? modelKey
             usdcUrl       = try? c.decode(String.self, forKey: .usdcUrl)
+            usdzUrl       = try? c.decode(String.self, forKey: .usdzUrl)
             center        = try? c.decode([Float].self, forKey: .center)
             dimensions    = try? c.decode([Float].self, forKey: .dimensions)
 
@@ -278,8 +293,10 @@ struct RoomDataPayload: Decodable {
 
         private enum CodingKeys: String, CodingKey {
             case identifier, id, category
-            case modelFileName, modelKey
+            case modelFileName
+            case modelKey = "model_key"
             case usdcUrl = "usdc_url"
+            case usdzUrl = "usdz_url"
             case center, dimensions, transform
         }
 
@@ -362,14 +379,20 @@ actor RoomOptimizerService {
 
     private struct CompleteUploadRequest: Encodable {
         let uploadedKeys: [String]
-        enum CodingKeys: String, CodingKey { case uploadedKeys = "uploaded_keys" }
+        let runPipeline: Bool
+        enum CodingKeys: String, CodingKey {
+            case uploadedKeys = "uploaded_keys"
+            case runPipeline  = "run_pipeline"
+        }
     }
 
-    func completeScanUpload(roomId: Int, uploadedKeys: [String], accessToken: String) async throws -> CompleteUploadResponse {
+    /// runPipeline이 false면 원본 버전만 확정하고 바로 반환한다 (그냥 "저장하기" 용도 — 색상이
+    /// 반영된 서버 카탈로그 모델을 조회할 수 있는 원본 버전이 이때 비로소 생긴다).
+    func completeScanUpload(roomId: Int, uploadedKeys: [String], accessToken: String, runPipeline: Bool = true) async throws -> CompleteUploadResponse {
         // POST /api/rooms/{room_id}/complete  (stale-connection 대비 최대 3회 재시도)
         // 서버가 실제로 업로드된 S3 키 목록을 확인하므로 uploaded_keys를 반드시 함께 보내야 함
         let url = URL(string: "\(roomsBase)/\(roomId)/complete")!
-        let body = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys))
+        let body = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys, runPipeline: runPipeline))
 
         var lastError: Error = OptimizerError.serverError
         for attempt in 1...3 {
@@ -378,7 +401,9 @@ actor RoomOptimizerService {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             req.httpBody = body
-            req.timeoutInterval = 30
+            // S3 키 존재 확인 + 파이프라인 트리거를 서버가 동기로 처리해서 서버가 붐빌 때
+            // 한참 걸릴 수 있어 3분으로 늘림. 타임아웃도 연결 끊김과 마찬가지로 재시도 대상에 포함.
+            req.timeoutInterval = 180
 
             do {
                 let (data, response) = try await URLSession.shared.data(for: req)
@@ -387,8 +412,8 @@ actor RoomOptimizerService {
                     throw OptimizerError.serverError
                 }
                 return try JSONDecoder().decode(CompleteUploadResponse.self, from: data)
-            } catch let err as NSError where err.code == NSURLErrorNetworkConnectionLost && attempt < 3 {
-                print("⚠️ complete 연결 끊김 (\(attempt)/3) – 재시도")
+            } catch let err as NSError where (err.code == NSURLErrorNetworkConnectionLost || err.code == NSURLErrorTimedOut) && attempt < 3 {
+                print("⚠️ complete 실패 (\(err.code == NSURLErrorTimedOut ? "타임아웃" : "연결 끊김")) (\(attempt)/3) – 재시도")
                 lastError = err
                 try await Task.sleep(for: .seconds(1))
             }
@@ -478,17 +503,6 @@ actor RoomOptimizerService {
         }
         print("📦 버전 상세: \(String(data: data, encoding: .utf8) ?? "")")
         return try JSONDecoder().decode(RoomVersionDetail.self, from: data)
-    }
-
-    /// GET /api/rooms/catalog/models – 서버에 등록된 기본 가구 카탈로그 조회
-    func fetchCatalogModels() async throws -> [CatalogModel] {
-        let url = URL(string: "\(roomsBase)/catalog/models")!
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            print("❌ 카탈로그 조회 응답: \(String(data: data, encoding: .utf8) ?? "")")
-            throw OptimizerError.serverError
-        }
-        return try JSONDecoder().decode(CatalogModelsResponse.self, from: data).models
     }
 
     /// Presigned URL에서 USDZ 다운로드 → 로컬 임시 파일 URL 반환

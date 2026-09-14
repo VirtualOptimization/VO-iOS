@@ -32,7 +32,9 @@ struct FurnitureModelResultView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .contentShape(Rectangle())
-        .onTapGesture { isFocused = false }
+        // onTapGesture는 버튼과 같은 제스처 우선순위를 다퉈서 탭 반응이 늦어지므로
+        // simultaneousGesture로 버튼 탭을 막지 않게 처리
+        .simultaneousGesture(TapGesture().onEnded { isFocused = false })
         .sheet(isPresented: $showQLPreview) {
             QuickLookPreview(url: modelURL)
         }
