@@ -6,10 +6,12 @@ import simd
 
 /// POST /rooms/start 요청
 private struct StartScanRequest: Encodable {
+    let name:                String
     let includeRoomUsdz:     Bool
     let includeRoomEmptyUsdz: Bool
 
     enum CodingKeys: String, CodingKey {
+        case name
         case includeRoomUsdz      = "include_room_usdz"
         case includeRoomEmptyUsdz = "include_room_empty_usdz"
     }
@@ -119,17 +121,40 @@ struct ScanVersion: Codable, Identifiable {
     let createdAt:   String?
     let versionId:   Int?
     let versionNo:   Int?
+    /// 편집본 이름 (사용자가 저장할 때 입력한 이름, 없으면 서버 자동 이름)
+    let versionName: String?
+    /// 편집본을 만든 곳: "IOS" | "UNITY". 출처를 남기기 전에 저장된 버전은 nil.
+    let editor: String?
 
-    var id: String { versionId.map { String($0) } ?? versionType }
+    /// 서버 ID가 있는 현재 버전은 그 값을 안정적인 식별자로 쓴다. 아주 오래된 응답처럼
+    /// version_id가 없는 항목은 타입 하나만 쓰면 같은 타입의 항목끼리 충돌할 수 있으므로,
+    /// 서버가 내려주는 나머지 고정 필드를 함께 묶어 SwiftUI 목록/선택 키를 만든다.
+    var id: String {
+        if let versionId { return "version:\(versionId)" }
+        return [
+            "legacy",
+            versionType.uppercased(),
+            versionNo.map(String.init) ?? "no-number",
+            createdAt ?? "no-date",
+            versionName ?? "no-name",
+            editor?.uppercased() ?? "no-editor",
+        ].joined(separator: "|")
+    }
 
     enum CodingKeys: String, CodingKey {
         case versionType = "version_type"
         case createdAt   = "created_at"
         case versionId   = "version_id"
         case versionNo   = "version_no"
+        case versionName = "version_name"
+        case editor
     }
 
+    /// 목록에 보여줄 이름 — 편집본은 저장할 때 붙인 이름이 있으면 그걸 쓴다.
     var displayName: String {
+        if let name = versionName?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+            return name
+        }
         switch versionType.uppercased() {
         case "ORIGINAL", "ORIGIN": return "원본"
         case "OPTIMIZED":          return "최적화"
@@ -149,6 +174,18 @@ struct ScanVersion: Codable, Identifiable {
         }
     }
 
+    /// 편집본을 어디서 저장했는지 — 서버가 보내온 좌표 형태로 판단해 내려준다.
+    enum EditSource { case app, vr }
+
+    var editSource: EditSource? {
+        guard versionType.uppercased() == "USER_EDITED" else { return nil }
+        switch editor?.uppercased() {
+        case "IOS":   return .app
+        case "UNITY": return .vr
+        default:      return nil
+        }
+    }
+
     var canBeDeleted: Bool {
         let t = versionType.uppercased()
         return t == "USER_EDITED" || t == "VR_MODIFIED"
@@ -164,6 +201,18 @@ struct ScanDetail: Codable {
     enum CodingKeys: String, CodingKey {
         case roomId      = "room_id"
         case versions
+    }
+}
+
+/// POST /api/rooms/{room_id}/versions 응답. 서버가 실제로 연결한 부모 버전을 앱에서도
+/// 확인해, 화면에서 편집한 기준 버전과 어긋나는 회귀를 로그에서 바로 찾을 수 있게 한다.
+struct UserEditedVersionCreateResponse: Decodable {
+    let versionId: Int
+    let parentVersionId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case versionId = "version_id"
+        case parentVersionId = "parent_version_id"
     }
 }
 
@@ -341,7 +390,8 @@ actor RoomOptimizerService {
 
     // MARK: 📤 업로드 세션 시작
 
-    func startScanUpload(includeRoomUsdz: Bool = true,
+    func startScanUpload(name: String,
+                         includeRoomUsdz: Bool = true,
                          includeRoomEmptyUsdz: Bool = false,
                          accessToken: String) async throws -> StartScanResponse {
         let url = URL(string: "\(roomsBase)/start")!
@@ -350,7 +400,8 @@ actor RoomOptimizerService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONEncoder().encode(
-            StartScanRequest(includeRoomUsdz: includeRoomUsdz,
+            StartScanRequest(name: name,
+                             includeRoomUsdz: includeRoomUsdz,
                              includeRoomEmptyUsdz: includeRoomEmptyUsdz)
         )
         req.timeoutInterval = 30
@@ -489,22 +540,26 @@ actor RoomOptimizerService {
     private struct UserEditedVersionRequest: Encodable {
         let parentVersionId: Int
         let iosObjects: [FurniturePoseEdit]
+        let versionName: String
         enum CodingKeys: String, CodingKey {
             case parentVersionId = "parent_version_id"
             case iosObjects      = "ios_objects"
+            case versionName     = "version_name"
         }
     }
 
     /// 앱에서 옮긴 가구를 새 "사용자 편집" 버전으로 저장한다. 서버가 Unity 좌표계 파일도 같이
     /// 만들어주기 때문에, 저장한 편집본은 VR에서도 그대로 열린다.
-    func createUserEditedVersion(roomId: Int, parentVersionId: Int,
-                                 edits: [FurniturePoseEdit], accessToken: String) async throws {
+    func createUserEditedVersion(roomId: Int, parentVersionId: Int, name: String,
+                                 edits: [FurniturePoseEdit], accessToken: String) async throws
+        -> UserEditedVersionCreateResponse {
         var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/versions")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONEncoder().encode(
-            UserEditedVersionRequest(parentVersionId: parentVersionId, iosObjects: edits))
+            UserEditedVersionRequest(parentVersionId: parentVersionId, iosObjects: edits,
+                                     versionName: name))
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -512,6 +567,7 @@ actor RoomOptimizerService {
             print("❌ 편집본 저장 응답(\(status)): \(String(data: data, encoding: .utf8) ?? "")")
             throw APIError.from(statusCode: status, data: data)
         }
+        return try JSONDecoder().decode(UserEditedVersionCreateResponse.self, from: data)
     }
 
     // MARK: 🗂️ 내 공간 목록 (로그인 사용자 기준, 버전 상태 요약 포함)
@@ -567,6 +623,19 @@ actor RoomOptimizerService {
 
     // MARK: 🗑️ 버전 삭제 (VR 수정본 전용)
     // DELETE /api/rooms/{room_id}/versions/{version_id}
+    /// DELETE /api/rooms/{room_id} — 방과 그 안의 모든 버전을 지운다.
+    func deleteRoom(roomId: Int, accessToken: String) async throws {
+        var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)")!)
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("❌ 방 삭제 응답(\(status)): \(String(data: data, encoding: .utf8) ?? "")")
+            throw APIError.from(statusCode: status, data: data)
+        }
+    }
+
     func deleteVersion(roomId: Int, versionId: Int, accessToken: String) async throws {
         let url = URL(string: "\(roomsBase)/\(roomId)/versions/\(versionId)")!
         var req = URLRequest(url: url)

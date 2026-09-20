@@ -5,6 +5,12 @@ import RealityKit
 struct RoomResultView: View {
     let room: CapturedRoom
     @ObservedObject var vm: ScanViewModel
+    @State private var showNamePrompt = false
+    @State private var roomName = ""
+
+    private var trimmedRoomName: String {
+        roomName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,8 +46,11 @@ struct RoomResultView: View {
                 }
                 .foregroundStyle(.secondary)
 
-                Button("저장하기") { vm.saveAndUpload(room: room) }
-                    .buttonStyle(VOFilledButtonStyle())
+                Button("저장하기") {
+                    roomName = ""
+                    showNamePrompt = true
+                }
+                .buttonStyle(VOFilledButtonStyle())
 
                 Button("다시 찍기") { vm.retake() }
                     .buttonStyle(VOOutlineButtonStyle())
@@ -54,6 +63,16 @@ struct RoomResultView: View {
         }, message: {
             Text(vm.uploadError ?? "")
         })
+        .alert("방 이름을 정해주세요", isPresented: $showNamePrompt) {
+            TextField("예: 나의 자취방", text: $roomName)
+            Button("취소", role: .cancel) {}
+            Button("저장") {
+                vm.saveAndUpload(room: room, name: trimmedRoomName)
+            }
+            .disabled(trimmedRoomName.isEmpty)
+        } message: {
+            Text("내 공간 목록과 방 조회 화면에 이 이름으로 표시돼요.")
+        }
     }
 }
 

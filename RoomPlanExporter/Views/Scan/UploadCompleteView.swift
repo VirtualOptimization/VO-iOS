@@ -6,19 +6,15 @@ struct UploadCompleteView: View {
     let roomId: Int
     @ObservedObject var vm: ScanViewModel
 
-    @State private var name: String = ""
-    @FocusState private var isFocused: Bool
-
-
-    private var spaceId: UUID? {
-        vm.savedSpaces.first { $0.roomId == roomId }?.id
+    private var roomName: String {
+        vm.savedSpaces.first { $0.roomId == roomId }?.name ?? "내 공간"
     }
 
     var body: some View {
         VStack(spacing: 0) {
             // 배너
             ZStack {
-                Text("내 방 저장 완료 !")
+                Text("\(roomName) 저장 완료!")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -33,23 +29,6 @@ struct UploadCompleteView: View {
             .padding(.vertical, 5)
             .padding(.horizontal, 20)
             .voGlassBanner()
-
-            // 방 이름 — 완료 키, 내 방 보러가기, 메인으로를 누를 때 저장된다
-            HStack(spacing: 8) {
-                TextField("방 이름을 입력해주세요", text: $name)
-                    .focused($isFocused)
-                    .font(.title3.bold())
-                    .onSubmit { commitName() }
-                Image(systemName: "pencil")
-                    .foregroundStyle(Color.voBlue)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Color(.systemGray5)).frame(height: 1)
-                    .padding(.horizontal, 24)
-            }
-            .onAppear { name = vm.savedSpaces.first { $0.roomId == roomId }?.name ?? "내 공간" }
 
             Divider()
 
@@ -67,13 +46,11 @@ struct UploadCompleteView: View {
                 .foregroundStyle(.secondary)
 
                 Button("내 방 편집하러 가기") {
-                    commitName()
                     vm.openSavedRoom(roomId: roomId)
                 }
                 .buttonStyle(VOFilledButtonStyle())
 
                 Button("메인으로") {
-                    commitName()
                     vm.retake()
                 }
                 .buttonStyle(VOOutlineButtonStyle())
@@ -81,12 +58,7 @@ struct UploadCompleteView: View {
             .padding(.horizontal, 50)
             .padding(.vertical, 20)
         }
-        .contentShape(Rectangle())
-        // onTapGesture는 버튼과 같은 제스처 우선순위를 다퉈서 탭 반응이 늦어지므로
-        // simultaneousGesture로 버튼 탭을 막지 않게 처리
-        .simultaneousGesture(TapGesture().onEnded { isFocused = false })
         // 업로드 직후 화면이 뜨자마자 원본 버전을 확정해서 서버 색상이 반영된 뷰어로 바로 전환
-        // (이름 저장 버튼을 따로 눌러야만 색이 뜨는 건 사용자 입장에서 헷갈림)
         .onAppear {
             if vm.savedOriginalDetail == nil {
                 vm.finalizeSave(roomId: roomId)
@@ -94,14 +66,6 @@ struct UploadCompleteView: View {
         }
     }
 
-    private func commitName() {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, let spaceId else { return }
-        vm.updateSpaceName(trimmed, id: spaceId)
-        if vm.savedOriginalDetail == nil {
-            vm.finalizeSave(roomId: roomId)
-        }
-    }
 }
 
 /// Original room always uses server assets, never a colored local placeholder.

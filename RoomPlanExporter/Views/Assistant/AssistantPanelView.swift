@@ -29,8 +29,8 @@ struct AssistantPanelView: View {
                 inputBar
             }
         }
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // 패널 자체는 배경 없이 — 대화 중에도 뒤의 3D 방이 그대로 보이도록 말풍선과 입력창에만
+        // 반투명 배경을 둔다.
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
         .task { await vm.loadRoomIfNeeded() }
@@ -84,15 +84,22 @@ struct AssistantPanelView: View {
     private func bubble(for msg: ChatMessage) -> some View {
         HStack {
             if msg.role == .user { Spacer(minLength: 40) }
-            Text(msg.text)
-                .font(.regular13)
-                .foregroundStyle(msg.role == .user ? .white : .primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    msg.role == .user ? Color.voBlue : Color(.systemGray6),
-                    in: RoundedRectangle(cornerRadius: 14)
-                )
+            Group {
+                if msg.role == .user {
+                    Text(msg.text)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Color.voBlue, in: RoundedRectangle(cornerRadius: 14))
+                } else {
+                    Text(msg.text)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+            .font(.regular13)
             if msg.role == .assistant { Spacer(minLength: 40) }
         }
     }
@@ -135,7 +142,7 @@ struct AssistantPanelView: View {
                 .onSubmit { vm.send() }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Color(.systemBackground).opacity(0.7), in: Capsule())
+                .background(.ultraThinMaterial, in: Capsule())
 
             Button(action: { vm.send() }) {
                 Image(systemName: "arrow.up.circle.fill")

@@ -57,7 +57,27 @@ extension ScanViewModel {
     }
 
     /// 편집 모드에서 옮긴 가구를 새 "사용자 편집" 버전으로 저장하고, 저장된 버전을 보여준다.
-    func saveEditedVersion(roomId: Int, parentVersionId: Int, edits: [FurniturePoseEdit], from detail: ScanDetail) {
+    /// 방과 그 안의 모든 버전을 삭제하고 메인으로 돌아간다.
+    func deleteRoom(roomId: Int) {
+        guard let accessToken = KeychainTokenStore.get(.accessToken) else {
+            inquiryError = "로그인이 필요해요"
+            return
+        }
+        Task {
+            do {
+                try await optimizer.deleteRoom(roomId: roomId, accessToken: accessToken)
+                savedSpaces.removeAll { $0.roomId == roomId }
+                roomStatus[roomId] = nil
+                phase = .main
+                syncRoomsWithServer()
+            } catch {
+                print("❌ 방 삭제 실패: \(error)")
+                inquiryError = (error as? LocalizedError)?.errorDescription ?? "방을 삭제하지 못했어요."
+            }
+        }
+    }
+
+    func saveEditedVersion(roomId: Int, parentVersionId: Int, name: String, edits: [FurniturePoseEdit], from detail: ScanDetail) {
         guard !edits.isEmpty else {
             editError = "옮긴 가구가 없어요. 가구를 옮긴 뒤 저장해주세요."
             return
@@ -69,9 +89,23 @@ extension ScanViewModel {
         phase = .inquiryLoading(roomId: roomId)
         Task {
             do {
-                try await optimizer.createUserEditedVersion(
-                    roomId: roomId, parentVersionId: parentVersionId, edits: edits, accessToken: accessToken)
+                let created = try await optimizer.createUserEditedVersion(
+                    roomId: roomId, parentVersionId: parentVersionId, name: name,
+                    edits: edits, accessToken: accessToken)
+                guard created.parentVersionId == parentVersionId else {
+                    print("❌ 편집본 부모 불일치: 요청=\(parentVersionId), 응답=\(created.parentVersionId)")
+                    throw OptimizerError.invalidResponse
+                }
                 let updated = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
+                let savedEditor = updated.versions
+                    .first(where: { $0.versionId == created.versionId })?
+                    .editor?
+                    .uppercased()
+                if savedEditor != "IOS" {
+                    print("⚠️ 편집본 출처 불일치: versionId=\(created.versionId), editor=\(savedEditor ?? "nil")")
+                } else {
+                    print("✅ 편집본 저장 확인: versionId=\(created.versionId), parent=\(created.parentVersionId), editor=IOS")
+                }
                 phase = .inquiryResult(updated)   // 가장 최근 편집본이 자동으로 선택된다
                 syncRoomsWithServer()
             } catch {

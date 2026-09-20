@@ -5,7 +5,12 @@ import RoomPlan
 
 extension ScanViewModel {
 
-    func saveAndUpload(room: CapturedRoom) {
+    func saveAndUpload(room: CapturedRoom, name: String) {
+        let roomName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !roomName.isEmpty else {
+            uploadError = "방 이름을 입력해주세요."
+            return
+        }
         phase = .uploading(room)
         uploadError = nil
         savedOriginalDetail = nil
@@ -25,7 +30,8 @@ extension ScanViewModel {
 
                 // 2. 업로드 세션 시작 (방을 현재 사용자와 연결)
                 print("🌐 [2/4] 업로드 세션 시작 (includeRoomUsdz=\(usdzExists), includeEmpty=\(emptyUsdzExists))")
-                let startResp = try await optimizer.startScanUpload(includeRoomUsdz: usdzExists,
+                let startResp = try await optimizer.startScanUpload(name: roomName,
+                                                                      includeRoomUsdz: usdzExists,
                                                                       includeRoomEmptyUsdz: emptyUsdzExists,
                                                                       accessToken: accessToken)
                 let roomId = startResp.roomId
@@ -45,7 +51,7 @@ extension ScanViewModel {
 
                 pendingUploadedKeys = startResp.uploads.map { $0.s3Key }
 
-                let space = SavedSpace(roomId: roomId)
+                let space = SavedSpace(name: roomName, roomId: roomId)
                 savedSpaces.insert(space, at: 0)
                 persistSpaces()
 
@@ -160,19 +166,22 @@ extension ScanViewModel {
 
     // MARK: 공간 목록 관리
 
-    func updateSpaceName(_ name: String, id: UUID) {
-        guard let idx = savedSpaces.firstIndex(where: { $0.id == id }) else { return }
-        savedSpaces[idx].name = name
-        persistSpaces()
+    func updateSpaceName(_ name: String, roomId: Int) {
+        let roomName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !roomName.isEmpty else { return }
+        if let idx = savedSpaces.firstIndex(where: { $0.roomId == roomId }) {
+            savedSpaces[idx].name = roomName
+            persistSpaces()
+        }
 
-        // 서버에도 반영 (다른 기기/재설치 후에도 이름 유지) – best-effort, 실패해도 로컬은 이미 저장됨
-        let roomId = savedSpaces[idx].roomId
+        // 서버에도 반영해서 다른 기기나 재설치 후에도 같은 이름을 사용한다.
         guard let accessToken = KeychainTokenStore.get(.accessToken) else { return }
         Task {
             do {
-                try await optimizer.updateRoomName(roomId: roomId, name: name, accessToken: accessToken)
+                try await optimizer.updateRoomName(roomId: roomId, name: roomName, accessToken: accessToken)
             } catch {
-                print("⚠️ 방 이름 서버 동기화 실패 (로컬은 유지됨): \(error)")
+                print("⚠️ 방 이름 서버 동기화 실패: \(error)")
+                inquiryError = "방 이름을 서버에 저장하지 못했어요. 잠시 후 다시 시도해주세요."
             }
         }
     }

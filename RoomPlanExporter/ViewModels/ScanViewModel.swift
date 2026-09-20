@@ -11,7 +11,7 @@ enum ScanPhase {
     case scanning
     case result(CapturedRoom)                                         // 스캔 완료 – 저장 전
     case uploading(CapturedRoom)                                      // S3 파일 업로드 중
-    case uploadComplete(CapturedRoom, roomId: Int)                    // 업로드 완료 – 방 이름 입력
+    case uploadComplete(CapturedRoom, roomId: Int)                    // 방 이름을 포함한 업로드 완료
     case processing(roomId: Int)                                      // 내 방 조회에서 최적화 요청 후 폴링 중
     case inquiryLoading(roomId: Int)                                  // 공간 조회 중
     case inquiryResult(ScanDetail, focusVersionType: String? = nil)   // 내 방 조회 (최적화·편집·AI 상담)
