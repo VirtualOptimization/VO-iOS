@@ -150,17 +150,18 @@ struct ScanVersion: Codable, Identifiable {
         case editor
     }
 
-    /// 목록에 보여줄 이름 — 편집본은 저장할 때 붙인 이름이 있으면 그걸 쓴다.
+    /// 목록에 보여줄 이름 — 원본/최적화는 고정 라벨을 쓰고, 편집본만 사용자가 붙인 이름을 쓴다.
     var displayName: String {
-        if let name = versionName?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            return name
-        }
         switch versionType.uppercased() {
         case "ORIGINAL", "ORIGIN": return "원본"
         case "OPTIMIZED":          return "최적화"
-        case "USER_EDITED":        return "사용자 편집"
-        case "VR_MODIFIED":        return "VR 수정본"
-        default:                   return versionType
+        case "USER_EDITED", "VR_MODIFIED":
+            if let name = versionName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                return name
+            }
+            return versionType.uppercased() == "VR_MODIFIED" ? "VR 수정본" : "사용자 편집"
+        default:
+            return versionType
         }
     }
 
