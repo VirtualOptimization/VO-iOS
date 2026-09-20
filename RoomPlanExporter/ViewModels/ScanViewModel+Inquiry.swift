@@ -133,4 +133,36 @@ extension ScanViewModel {
             }
         }
     }
+
+    func renameVersion(roomId: Int, versionId: Int, name: String, from detail: ScanDetail) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            inquiryError = "편집본 이름을 입력해주세요."
+            return
+        }
+        guard let accessToken = KeychainTokenStore.get(.accessToken) else {
+            inquiryError = "로그인이 필요해요"
+            return
+        }
+
+        Task {
+            do {
+                try await optimizer.updateVersionName(
+                    roomId: roomId,
+                    versionId: versionId,
+                    name: trimmed,
+                    accessToken: accessToken
+                )
+                let updated = try await optimizer.fetchRoomVersions(
+                    roomId: roomId,
+                    accessToken: accessToken
+                )
+                phase = .inquiryResult(updated)
+            } catch {
+                print("❌ 편집본 이름 수정 실패: \(error)")
+                inquiryError = "이름 수정에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                phase = .inquiryResult(detail)
+            }
+        }
+    }
 }

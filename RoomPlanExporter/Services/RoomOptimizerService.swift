@@ -187,8 +187,7 @@ struct ScanVersion: Codable, Identifiable {
     }
 
     var canBeDeleted: Bool {
-        let t = versionType.uppercased()
-        return t == "USER_EDITED" || t == "VR_MODIFIED"
+        versionType.uppercased() == "USER_EDITED"
     }
 
     var supportsDownload: Bool { true }
@@ -570,6 +569,32 @@ actor RoomOptimizerService {
         return try JSONDecoder().decode(UserEditedVersionCreateResponse.self, from: data)
     }
 
+    private struct UserEditedVersionNameRequest: Encodable {
+        let versionName: String
+
+        enum CodingKeys: String, CodingKey {
+            case versionName = "version_name"
+        }
+    }
+
+    /// PATCH /api/rooms/{room_id}/versions/{version_id}
+    /// 원본과 최적화는 건드리지 않고 USER_EDITED 버전의 표시 이름만 변경한다.
+    func updateVersionName(roomId: Int, versionId: Int, name: String,
+                           accessToken: String) async throws {
+        var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/versions/\(versionId)")!)
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONEncoder().encode(UserEditedVersionNameRequest(versionName: name))
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("❌ 편집본 이름 수정 응답(\(status)): \(String(data: data, encoding: .utf8) ?? "")")
+            throw APIError.from(statusCode: status, data: data)
+        }
+    }
+
     // MARK: 🗂️ 내 공간 목록 (로그인 사용자 기준, 버전 상태 요약 포함)
 
     /// GET /api/rooms
@@ -621,7 +646,7 @@ actor RoomOptimizerService {
         return destURL
     }
 
-    // MARK: 🗑️ 버전 삭제 (VR 수정본 전용)
+    // MARK: 🗑️ 버전 삭제 (USER_EDITED 전용)
     // DELETE /api/rooms/{room_id}/versions/{version_id}
     /// DELETE /api/rooms/{room_id} — 방과 그 안의 모든 버전을 지운다.
     func deleteRoom(roomId: Int, accessToken: String) async throws {

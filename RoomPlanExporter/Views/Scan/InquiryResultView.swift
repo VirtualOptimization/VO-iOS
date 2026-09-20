@@ -33,6 +33,9 @@ struct InquiryResultView: View {
         return detail.versions.first?.id ?? ""
     }
     @State private var versionToDelete: ScanVersion? = nil
+    @State private var versionToRename: ScanVersion? = nil
+    @State private var versionNameDraft = ""
+    @State private var showVersionNamePrompt = false
     private enum ScreenMode { case normal, assistant, edit }
     @State private var mode: ScreenMode = .normal
     @State private var assistantVM: AssistantViewModel?
@@ -233,6 +236,14 @@ struct InquiryResultView: View {
             versionListPanel
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .alert("편집본 이름 수정", isPresented: $showVersionNamePrompt) {
+                    TextField("예: 침대 창가 배치", text: $versionNameDraft)
+                    Button("취소", role: .cancel) { versionToRename = nil }
+                    Button("저장") { saveVersionName() }
+                        .disabled(versionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } message: {
+                    Text("버전 목록에 표시되는 이름만 변경돼요.")
+                }
                 // 삭제 확인창은 시트 안에 붙여야 목록 위로 뜬다 — 바깥 화면에 붙이면
                 // 시트에 가려져서 시트를 내려야만 보인다.
                 .alert("'\(versionToDelete?.displayName ?? "")'를 삭제할까요?",
@@ -436,6 +447,9 @@ struct InquiryResultView: View {
                                 withAnimation(.easeInOut(duration: 0.2)) { selectedVersionKey = version.id }
                                 showVersionSheet = false
                             },
+                            onRename: {
+                                beginVersionRename(version)
+                            },
                             onDelete: {
                                 versionToDelete = version
                                 showDeleteAlert = true
@@ -448,6 +462,25 @@ struct InquiryResultView: View {
             }
         }
         .background(Color(.systemBackground))
+    }
+
+    private func beginVersionRename(_ version: ScanVersion) {
+        versionToRename = version
+        versionNameDraft = version.displayName
+        // 메뉴가 닫힌 뒤 입력창을 띄워 프레젠테이션이 겹치지 않게 한다.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            showVersionNamePrompt = true
+        }
+    }
+
+    private func saveVersionName() {
+        guard let version = versionToRename, let versionId = version.versionId else { return }
+        let trimmed = versionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        vm.renameVersion(roomId: detail.roomId, versionId: versionId,
+                         name: trimmed, from: detail)
+        versionToRename = nil
     }
 
     // MARK: 화면 모드 전환
@@ -564,10 +597,11 @@ private struct VersionRow: View {
     let version: ScanVersion
     let isSelected: Bool
     let onSelect: () -> Void
+    let onRename: () -> Void
     let onDelete: () -> Void
 
-    // 원본·최적화는 지울 수 없고, 사용자 편집본과 VR 수정본만 삭제 가능
-    private var canDelete: Bool {
+    // 원본·최적화는 보호하고 USER_EDITED 버전만 관리 메뉴를 노출한다.
+    private var canManage: Bool {
         version.canBeDeleted && version.versionId != nil
     }
 
@@ -612,12 +646,18 @@ private struct VersionRow: View {
 
             Spacer()
 
-            // 삭제 버튼 (원본 제외, 플레이스홀더 제외)
-            if canDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
+            if canManage {
+                Menu {
+                    Button(action: onRename) {
+                        Label("이름 수정", systemImage: "pencil")
+                    }
+                    Button(role: .destructive, action: onDelete) {
+                        Label("버전 삭제", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
                         .font(.subheadline)
-                        .foregroundStyle(.red.opacity(0.75))
+                        .foregroundStyle(.secondary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
