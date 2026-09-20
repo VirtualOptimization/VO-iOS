@@ -97,15 +97,11 @@ private struct ScanFlowView: View {
                     tips: [
                         "최적화 진행 중입니다\n화면을 끄지 마세요",
                         "가구 배치를 분석하고 있어요",
-                        "원본과 최적화 결과를\n비교해볼 수 있어요",
+                        "끝나면 버전 선택에서\n원본과 비교해볼 수 있어요",
                         "잠시 후 최적화 결과가 나와요"
                     ]
                 )
                 .transition(.opacity)
-
-            case .optimized(let room, let versionDetail):
-                OptimizedResultView(room: room, versionDetail: versionDetail, vm: vm)
-                    .transition(.opacity)
 
             case .inquiryLoading:
                 InquiryLoadingView(tips: [
@@ -116,40 +112,8 @@ private struct ScanFlowView: View {
                 ])
                 .transition(.opacity)
 
-            case .inquiryResult(let detail):
-                InquiryResultView(detail: detail, vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureMethodPicker:
-                FurnitureMethodPickerView(vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureGuide:
-                FurnitureCaptureGuideView(vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureLidarCapture:
-                FurnitureLidarCaptureView(vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureAIEntry(let image):
-                FurnitureAIEntryView(image: image, vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureProcessing(let thumbnail):
-                FurnitureProcessingView(thumbnail: thumbnail, vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureModelReady(let modelURL, let thumbnail):
-                FurnitureModelResultView(vm: vm, modelURL: modelURL, thumbnail: thumbnail)
-                    .transition(.opacity)
-
-            case .furnitureList:
-                FurnitureListView(vm: vm)
-                    .transition(.opacity)
-
-            case .furnitureAICompare:
-                FurnitureAICompareView(vm: vm)
+            case .inquiryResult(let detail, let focusVersionType):
+                InquiryResultView(detail: detail, focusVersionType: focusVersionType, vm: vm)
                     .transition(.opacity)
             }
         }

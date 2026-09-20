@@ -259,8 +259,10 @@ struct RealityKitRoomView: UIViewRepresentable {
                 }
             }
 
-            // 폴백: OBB 박스
-            if !placed, serverModels == nil {
+            // 폴백: OBB 박스 — serverModels가 있어도(서버 모드) 대응 모델이 없는 가구는
+            // 카테고리 색상 박스로 대체한다. serverModels == nil 제약을 걸면 서버 모드에서
+            // 매칭 안 된 가구가 그냥 통째로 안 보이게 된다(회귀 원인).
+            if !placed {
                 var mat = SimpleMaterial()
                 mat.color = .init(tint: furnitureTint ?? colorForCategory(original.category))
                 mat.roughness = 0.9; mat.metallic = 0.0
@@ -755,6 +757,21 @@ final class FurnitureNudgeHandle: UIView {
 //       가구는 숨긴 뒤, JSON의 최적화된 가구를 오버레이한다.
 // 폴백: capturedRoom이 없으면 JSON 박스 기반 렌더링.
 
+/// 편집 모드에서 옮긴 가구의 새 위치·각도 (서버 ios_objects 형식 그대로)
+struct FurniturePoseEdit: Encodable {
+    let identifier: String
+    let center: [Float]
+    let rotation: [Float]
+}
+
+/// 3D 뷰 안에서 일어난 편집을 화면(SwiftUI) 쪽에서 꺼내올 수 있게 연결해주는 핸들.
+/// RealityKit 좌표를 아는 건 Coordinator뿐이라, 저장 시점에 Coordinator가 계산해서 넘겨준다.
+@MainActor
+final class FurnitureEditSession: ObservableObject {
+    fileprivate var collect: (() -> [FurniturePoseEdit])?
+    func pendingEdits() -> [FurniturePoseEdit] { collect?() ?? [] }
+}
+
 struct FurnitureRealityKitView: UIViewRepresentable {
     let detail: RoomVersionDetail
     var capturedRoom: CapturedRoom? = nil   // B안: 제공 시 로컬 USDZ로 방 shell 렌더링
@@ -774,6 +791,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     /// AI 배치 상담의 가구 제외 시뮬레이션(F03) 결과 — 여기 포함된 identifier의 가구는
     /// 실제로 3D 뷰에서 숨긴다 (지우는 게 아니라 isEnabled만 끔, 대화가 바뀌면 다시 켜짐).
     var hiddenIdentifiers: Set<String> = []
+    /// 편집 모드에서 옮긴 결과를 화면 쪽에서 꺼내가기 위한 연결 고리
+    var editSession: FurnitureEditSession? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -813,6 +832,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         // 씬 빌드 (비동기) – coordinator 전달로 카메라 거리 조정 가능
         let coord = context.coordinator
         coord.editMode = editMode
+        editSession?.collect = { [weak coord] in coord?.collectPoseEdits() ?? [] }
         Task { @MainActor in await buildScene(into: roomAnchor, coordinator: coord) }
 
         // 제스처 — editMode는 SwiftUI 상태 변경으로 나중에 켜질 수 있고 makeUIView는 다시 안
@@ -1062,17 +1082,19 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 }
             }
 
-            // 4. 박스 폴백
-            if !placed, allowsLocalFallback {
+            // 4. 박스 폴백 — allowsLocalFallback 여부와 무관하게 항상 적용한다.
+            // allowsLocalFallback=false는 "로컬 흰 카탈로그 모델을 먼저 보여주지 말라"는 뜻이지
+            // "대응 모델 없는 가구를 아예 숨기라"는 뜻이 아니다. 서버에 대응 모델이 없는 가구도
+            // 카테고리 색상 OBB로는 항상 표시해야 방 전체 미리보기가 빈 자리 없이 완성된다.
+            if !placed {
                 print("  📦 \(obj.category ?? ""): 박스 폴백")
                 let box = makeFallbackBox(for: obj)
                 box.transform = Transform(matrix: matrix)
                 anchor.addChild(box)
                 placedEntity = box
-            }
-
-            if !placed, !allowsLocalFallback {
-                onAssetFailure?("일부 서버 가구 모델을 불러오지 못했어요. 다시 불러오기를 눌러주세요.")
+                if !allowsLocalFallback {
+                    onAssetFailure?("일부 서버 가구 모델을 불러오지 못했어요. 다시 불러오기를 눌러주세요.")
+                }
             }
             // 히트테스트용 이름 + 콜리전 부여 (카탈로그 모델은 메쉬가 자식 노드일 수 있어 recursive) —
             // editMode가 나중에 켜질 수도 있으니 항상 준비해둔다.
@@ -1081,6 +1103,13 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 placedEntity.generateCollisionShapes(recursive: true)
                 // AI 배치 상담의 가구 제외 시뮬레이션이 나중에 켜고 끌 수 있도록 식별자로 등록
                 coordinator.entitiesByIdentifier[obj.identifier] = placedEntity
+                // 편집 저장 때 "얼마나 움직였는지" 비교할 기준값. applyTransform이 모델 중심을
+                // 맞추려고 위치를 pivot만큼 밀어놨을 수 있어서, 그 보정량도 같이 기억해둔다.
+                coordinator.poseBaseline[obj.identifier] = Coordinator.PoseBaseline(
+                    centerOffset: placedEntity.orientation.inverse.act(worldPos - placedEntity.position),
+                    center: worldPos,
+                    yaw: Coordinator.serverYaw(of: placedEntity.orientation)
+                )
                 // Preserve server coordinates on load. Wall clamping belongs to
                 // explicit user edits; independently pushing objects creates overlaps.
             }
@@ -1356,6 +1385,40 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         var editMode: Bool = false
         /// identifier → 배치된 엔티티. AI 배치 상담의 가구 제외 시뮬레이션이 이걸로 보이기/숨기기 전환
         var entitiesByIdentifier: [String: Entity] = [:]
+
+        /// 씬을 만들 때의 가구 자세 — 저장할 때 실제로 움직인 가구만 골라내는 기준이 된다.
+        struct PoseBaseline {
+            /// 엔티티 위치와 가구 중심의 차이 (가구 좌표계 기준이라 회전해도 그대로 쓸 수 있음)
+            let centerOffset: SIMD3<Float>
+            let center: SIMD3<Float>
+            let yaw: Float
+        }
+        var poseBaseline: [String: PoseBaseline] = [:]
+
+        /// 서버 JSON의 회전 표기(transform 첫 열이 [cos, 0, sin])에 맞춘 yaw 값
+        static func serverYaw(of orientation: simd_quatf) -> Float {
+            let axis = orientation.act(SIMD3<Float>(1, 0, 0))
+            return atan2(axis.z, axis.x)
+        }
+
+        /// 처음 위치·각도에서 실제로 바뀐 가구만 서버 형식으로 뽑아낸다.
+        func collectPoseEdits() -> [FurniturePoseEdit] {
+            var edits: [FurniturePoseEdit] = []
+            for (identifier, entity) in entitiesByIdentifier {
+                guard let base = poseBaseline[identifier] else { continue }
+                let center = entity.position + entity.orientation.act(base.centerOffset)
+                let yaw = Self.serverYaw(of: entity.orientation)
+                let moved = length(SIMD2(center.x - base.center.x, center.z - base.center.z)) > 0.005
+                let turned = abs(atan2(sin(yaw - base.yaw), cos(yaw - base.yaw))) > 0.01
+                guard moved || turned else { continue }
+                edits.append(FurniturePoseEdit(
+                    identifier: identifier,
+                    center: [center.x, base.center.y, center.z],
+                    rotation: [0, yaw, 0]
+                ))
+            }
+            return edits
+        }
         /// 편집 모드에서 선택된 가구를 옮기는 오른쪽 핸들바 — 선택 여부에 따라 보이기/숨기기
         var nudgeHandle: FurnitureNudgeHandle?
 

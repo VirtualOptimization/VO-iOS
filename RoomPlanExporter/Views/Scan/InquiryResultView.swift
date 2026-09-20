@@ -7,13 +7,17 @@ struct InquiryResultView: View {
     @State private var selectedIndex: Int
     @State private var showDeleteAlert  = false
 
-    init(detail: ScanDetail, vm: ScanViewModel) {
+    init(detail: ScanDetail, focusVersionType: String? = nil, vm: ScanViewModel) {
         self.detail = detail
         self._vm = ObservedObject(wrappedValue: vm)
 
-        // USER_EDITED 중 version_no가 가장 높은 것 우선 선택, 없으면 원본(ORIGINAL)부터 보여준다
+        // 방금 만든 버전(예: 최적화 완료 직후)이 있으면 그걸, 없으면 USER_EDITED 중 version_no가
+        // 가장 높은 것, 그것도 없으면 원본(ORIGINAL)부터 보여준다
         let userEditedVersions = detail.versions.filter { $0.versionType.uppercased() == "USER_EDITED" }
-        if let best = userEditedVersions.max(by: { ($0.versionNo ?? 0) < ($1.versionNo ?? 0) }),
+        if let focusVersionType,
+           let idx = detail.versions.firstIndex(where: { $0.versionType.uppercased() == focusVersionType.uppercased() }) {
+            _selectedIndex = State(initialValue: idx)
+        } else if let best = userEditedVersions.max(by: { ($0.versionNo ?? 0) < ($1.versionNo ?? 0) }),
            let idx = detail.versions.firstIndex(where: { $0.versionId == best.versionId }) {
             _selectedIndex = State(initialValue: idx)
         } else if let idx = detail.versions.firstIndex(where: { $0.versionType.uppercased() == "ORIGINAL" }) {
@@ -28,6 +32,7 @@ struct InquiryResultView: View {
     @State private var assistantVM: AssistantViewModel?
     @State private var showVersionSheet = false
     @State private var showActionHints = false
+    @StateObject private var editSession = FurnitureEditSession()
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
@@ -36,19 +41,40 @@ struct InquiryResultView: View {
 
     private let service = RoomOptimizerService()
 
-    // MARK: 버전 목록 (실제 버전 + VR 플레이스홀더)
+    // MARK: 버전 목록
 
-    private var displayVersions: [DisplayVersion] {
-        let real = detail.versions.map { DisplayVersion(version: $0, isPlaceholder: false) }
-        let hasUserEdited = detail.versions.contains { $0.versionType.uppercased() == "USER_EDITED" }
-        if hasUserEdited { return real }
-        let placeholder = ScanVersion(placeholderType: "USER_EDITED")
-        return real + [DisplayVersion(version: placeholder, isPlaceholder: true)]
+    private var selectedVersion: ScanVersion? {
+        guard selectedIndex < detail.versions.count else { return nil }
+        return detail.versions[selectedIndex]
     }
 
-    private var selectedDisplay: DisplayVersion? {
-        guard selectedIndex < displayVersions.count else { return nil }
-        return displayVersions[selectedIndex]
+    private var optimizedIndex: Int? {
+        detail.versions.firstIndex { $0.versionType.uppercased() == "OPTIMIZED" }
+    }
+
+    private var isViewingOptimized: Bool {
+        selectedVersion?.versionType.uppercased() == "OPTIMIZED"
+    }
+
+    /// 화면 위에 겹쳐 뜨는 동작 버튼 — 세 버튼이 같은 무게로 보이도록 생김새를 맞춘다
+    private func actionChip(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.semiBold12)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+
+    /// 최적화 결과가 이미 있으면 그 버전으로 전환, 없으면 새로 요청
+    private func optimize() {
+        if let optimizedIndex {
+            withAnimation(.easeInOut(duration: 0.2)) { selectedIndex = optimizedIndex }
+        } else {
+            vm.optimizeRoom(from: detail)
+        }
     }
 
     private var isViewerLoaded: Bool {
@@ -85,6 +111,7 @@ struct InquiryResultView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("가구를 탭해서 선택 → 오른쪽 핸들을 드래그해서 이동")
                                 Text("다시 탭하면 90도 회전")
+                                Text("다 옮겼으면 오른쪽 위 저장을 눌러주세요")
                             }
                             .font(.regular11)
                             .foregroundStyle(.black)
@@ -119,24 +146,20 @@ struct InquiryResultView: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if mode == .normal, currentDataURL != nil {
+                if mode == .normal {
                     VStack(alignment: .trailing, spacing: 8) {
-                        Button { enterAssistantMode() } label: {
-                            Label("AI 배치 상담", systemImage: "bubble.left.and.bubble.right.fill")
-                                .font(.semiBold12)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(.ultraThinMaterial, in: Capsule())
+                        if !isViewingOptimized {
+                            actionChip("최적화하기", icon: "sparkles") { optimize() }
                         }
-                        Button { mode = .edit } label: {
-                            Label("가구 편집", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-                                .font(.semiBold12)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(.ultraThinMaterial, in: Capsule())
+                        if currentDataURL != nil {
+                            actionChip("AI 배치 상담", icon: "bubble.left.and.bubble.right.fill") { enterAssistantMode() }
+                            actionChip("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right") { mode = .edit }
                         }
                     }
                     .padding(12)
+                } else if mode == .edit {
+                    actionChip("저장", icon: "square.and.arrow.down") { saveEdits() }
+                        .padding(12)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -152,8 +175,8 @@ struct InquiryResultView: View {
                 HStack(spacing: 10) {
                     Button { showVersionSheet = true } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: selectedDisplay?.version.systemIcon ?? "doc")
-                            Text(selectedDisplay?.version.displayName ?? "버전 선택")
+                            Image(systemName: selectedVersion?.systemIcon ?? "doc")
+                            Text(selectedVersion?.displayName ?? "버전 선택")
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 10, weight: .semibold))
                         }
@@ -229,6 +252,16 @@ struct InquiryResultView: View {
         }, message: {
             Text(vm.inquiryError ?? "")
         })
+        .alert("최적화 실패", isPresented: .constant(vm.optimizeError != nil), actions: {
+            Button("확인") { vm.optimizeError = nil }
+        }, message: {
+            Text(vm.optimizeError ?? "")
+        })
+        .alert("편집 저장 실패", isPresented: .constant(vm.editError != nil), actions: {
+            Button("확인") { vm.editError = nil }
+        }, message: {
+            Text(vm.editError ?? "")
+        })
     }
 
     // MARK: 배너
@@ -269,7 +302,8 @@ struct InquiryResultView: View {
         case .loaded(let versionDetail):
             FurnitureRealityKitView(detail: versionDetail, isTransparent: true,
                                     editMode: mode == .edit,
-                                    hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [])
+                                    hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [],
+                                    editSession: editSession)
                 .id(versionDetail.renderingID)
                 .ignoresSafeArea()
         case .error:
@@ -297,17 +331,16 @@ struct InquiryResultView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
-                    ForEach(Array(displayVersions.enumerated()), id: \.offset) { index, dv in
+                    ForEach(Array(detail.versions.enumerated()), id: \.offset) { index, version in
                         VersionRow(
-                            version: dv.version,
-                            isSelected: index == selectedIndex && !dv.isPlaceholder,
-                            isPlaceholder: dv.isPlaceholder,
+                            version: version,
+                            isSelected: index == selectedIndex,
                             onSelect: {
                                 withAnimation(.easeInOut(duration: 0.2)) { selectedIndex = index }
                                 showVersionSheet = false
                             },
                             onDelete: {
-                                versionToDelete = dv.version
+                                versionToDelete = version
                                 showDeleteAlert = true
                             }
                         )
@@ -328,6 +361,19 @@ struct InquiryResultView: View {
         withAnimation(.easeInOut(duration: 0.2)) { mode = .assistant }
     }
 
+    /// 옮긴 가구를 새 "사용자 편집" 버전으로 저장한다. 서버가 Unity 좌표계 파일도 함께 만들어서
+    /// VR에서도 같은 배치가 열린다.
+    private func saveEdits() {
+        guard let parentVersionId = selectedVersion?.versionId else {
+            vm.editError = "저장할 기준 버전을 찾지 못했어요."
+            return
+        }
+        vm.saveEditedVersion(roomId: detail.roomId,
+                             parentVersionId: parentVersionId,
+                             edits: editSession.pendingEdits(),
+                             from: detail)
+    }
+
     /// 채팅/가구 편집 모드 둘 다 이 버튼 하나로 나간다.
     private func exitSpecialMode() {
         assistantVM?.showAllFurniture()
@@ -339,12 +385,12 @@ struct InquiryResultView: View {
     // MARK: 버전 상세 다운로드 & 캐시
 
     private func loadViewer(force: Bool = false) {
-        guard let dv = selectedDisplay, !dv.isPlaceholder else {
+        guard let version = selectedVersion else {
             loadTask?.cancel()
             viewerState = .idle
             return
         }
-        let cacheKey = dv.version.versionId.map { String($0) } ?? dv.version.versionType
+        let cacheKey = version.versionId.map { String($0) } ?? version.versionType
 
         if !force, let cached = cachedData[cacheKey] {
             loadTask?.cancel()
@@ -355,7 +401,7 @@ struct InquiryResultView: View {
         loadTask?.cancel()
         viewerState = .loading
 
-        let snapshot = dv  // 선택 시점 캡처
+        let snapshot = version  // 선택 시점 캡처
         loadTask = Task {
             guard let accessToken = KeychainTokenStore.get(.accessToken) else {
                 viewerState = .error
@@ -363,8 +409,8 @@ struct InquiryResultView: View {
             }
             do {
                 let versionDetail: RoomVersionDetail
-                let versionType = snapshot.version.versionType.uppercased()
-                if let vid = snapshot.version.versionId {
+                let versionType = snapshot.versionType.uppercased()
+                if let vid = snapshot.versionId {
                     versionDetail = try await service.fetchVersionDetailById(
                         roomId: detail.roomId,
                         versionId: vid,
@@ -379,7 +425,7 @@ struct InquiryResultView: View {
                 } else {
                     versionDetail = try await service.fetchVersionDetail(
                         roomId: detail.roomId,
-                        versionType: snapshot.version.versionType.lowercased(),
+                        versionType: snapshot.versionType.lowercased(),
                         accessToken: accessToken
                     )
                 }
@@ -395,25 +441,17 @@ struct InquiryResultView: View {
     }
 }
 
-// MARK: - DisplayVersion
-
-private struct DisplayVersion {
-    let version: ScanVersion
-    let isPlaceholder: Bool
-}
-
 // MARK: - VersionRow
 
 private struct VersionRow: View {
     let version: ScanVersion
     let isSelected: Bool
-    let isPlaceholder: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
 
-    // 삭제는 VR 수정본(vr_modified)만 가능
+    // 원본·최적화는 지울 수 없고, 사용자 편집본과 VR 수정본만 삭제 가능
     private var canDelete: Bool {
-        !isPlaceholder && version.canBeDeleted && version.versionId != nil
+        version.canBeDeleted && version.versionId != nil
     }
 
     var body: some View {
@@ -434,20 +472,7 @@ private struct VersionRow: View {
                 HStack(spacing: 6) {
                     Text(version.displayName)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                        .foregroundStyle(
-                            isPlaceholder ? .tertiary :
-                            isSelected    ? .primary  : .secondary
-                        )
-
-                    if isPlaceholder {
-                        Text("준비 중")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.4), in: Capsule())
-                            .padding(.leading, 6)
-                    }
+                        .foregroundStyle(isSelected ? .primary : .secondary)
                 }
 
                 if let date = version.createdAt {
@@ -479,7 +504,7 @@ private struct VersionRow: View {
             in: RoundedRectangle(cornerRadius: 14)
         )
         .contentShape(Rectangle())
-        .onTapGesture { if !isPlaceholder { onSelect() } }
+        .onTapGesture { onSelect() }
     }
 
     private func shortDate(_ iso: String) -> String {

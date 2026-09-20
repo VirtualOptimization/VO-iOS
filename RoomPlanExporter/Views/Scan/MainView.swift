@@ -146,6 +146,7 @@ struct MainView: View {
             } else {
                 ForEach(vm.savedSpaces) { space in
                     SpaceRow(space: space, status: vm.roomStatus[space.roomId],
+                             isOptimizing: vm.optimizingRoomIds.contains(space.roomId),
                              onTap: { vm.fetchRoom(roomId: space.roomId) })
                     Divider().padding(.horizontal, 24)
                 }
@@ -159,6 +160,7 @@ struct MainView: View {
 private struct SpaceRow: View {
     let space: SavedSpace
     let status: MyRoomSummary?
+    let isOptimizing: Bool
     let onTap: () -> Void
 
     private var hasOptimized: Bool { status?.hasOptimized ?? false }
@@ -177,6 +179,16 @@ private struct SpaceRow: View {
                     .foregroundStyle(.primary)
 
                 Spacer()
+
+                if isOptimizing {
+                    HStack(spacing: 4) {
+                        ProgressView().scaleEffect(0.6)
+                        Text("최적화 중")
+                            .font(.regular11)
+                            .foregroundStyle(Color.voBlue)
+                    }
+                    .padding(.trailing, 6)
+                }
 
                 Image(systemName: "house")
                     .font(.system(size: 12))

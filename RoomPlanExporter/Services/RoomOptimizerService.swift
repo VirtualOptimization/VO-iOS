@@ -92,11 +92,24 @@ private struct MyRoomsResponse: Decodable {
 /// GET /api/rooms/{room_id} 응답 (status 폴링)
 struct RoomStatusResponse: Codable {
     let roomId: Int
-    let status: String   // "PENDING" | "PROCESSING" | "COMPLETED" | "ERROR"
+    let status: String               // 저장 상태: "PENDING" | "COMPLETED" | "FAILED"
+    let optimizationStatus: String   // 최적화 상태: "NONE" | "PROCESSING" | "COMPLETED" | "FAILED"
 
     enum CodingKeys: String, CodingKey {
         case roomId = "room_id"
         case status
+        case optimizationStatus = "optimization_status"
+    }
+}
+
+/// POST /api/rooms/{room_id}/optimize 응답
+struct OptimizeStartResponse: Decodable {
+    let roomId: Int
+    let optimizationStatus: String
+
+    enum CodingKeys: String, CodingKey {
+        case roomId = "room_id"
+        case optimizationStatus = "optimization_status"
     }
 }
 
@@ -114,14 +127,6 @@ struct ScanVersion: Codable, Identifiable {
         case createdAt   = "created_at"
         case versionId   = "version_id"
         case versionNo   = "version_no"
-    }
-
-    /// 플레이스홀더 생성용
-    init(placeholderType: String) {
-        self.versionType = placeholderType
-        self.createdAt   = nil
-        self.versionId   = nil
-        self.versionNo   = nil
     }
 
     var displayName: String {
@@ -379,20 +384,18 @@ actor RoomOptimizerService {
 
     private struct CompleteUploadRequest: Encodable {
         let uploadedKeys: [String]
-        let runPipeline: Bool
         enum CodingKeys: String, CodingKey {
             case uploadedKeys = "uploaded_keys"
-            case runPipeline  = "run_pipeline"
         }
     }
 
-    /// runPipeline이 false면 원본 버전만 확정하고 바로 반환한다 (그냥 "저장하기" 용도 — 색상이
-    /// 반영된 서버 카탈로그 모델을 조회할 수 있는 원본 버전이 이때 비로소 생긴다).
-    func completeScanUpload(roomId: Int, uploadedKeys: [String], accessToken: String, runPipeline: Bool = true) async throws -> CompleteUploadResponse {
+    /// 업로드한 스캔을 저장으로 확정한다 — 서버가 원본 버전을 만들고, 이때부터 색상이 반영된
+    /// 서버 카탈로그 모델로 조회할 수 있다. 최적화는 POST /optimize로 따로 요청한다.
+    func completeScanUpload(roomId: Int, uploadedKeys: [String], accessToken: String) async throws -> CompleteUploadResponse {
         // POST /api/rooms/{room_id}/complete  (stale-connection 대비 최대 3회 재시도)
         // 서버가 실제로 업로드된 S3 키 목록을 확인하므로 uploaded_keys를 반드시 함께 보내야 함
         let url = URL(string: "\(roomsBase)/\(roomId)/complete")!
-        let body = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys, runPipeline: runPipeline))
+        let body = try JSONEncoder().encode(CompleteUploadRequest(uploadedKeys: uploadedKeys))
 
         var lastError: Error = OptimizerError.serverError
         for attempt in 1...3 {
@@ -423,14 +426,31 @@ actor RoomOptimizerService {
 
     // MARK: 🔍 룸 상태 조회 (최적화 완료 폴링)
 
-    func fetchRoomStatus(roomId: Int, accessToken: String) async throws -> String {
+    func fetchRoomStatus(roomId: Int, accessToken: String) async throws -> RoomStatusResponse {
         var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)")!)
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw OptimizerError.serverError
         }
-        return try JSONDecoder().decode(RoomStatusResponse.self, from: data).status
+        return try JSONDecoder().decode(RoomStatusResponse.self, from: data)
+    }
+
+    // MARK: ✨ 최적화 시작 (POST /api/rooms/{room_id}/optimize)
+
+    /// 저장된 원본으로 최적화를 시작하고 최적화 상태를 돌려준다. 서버는 바로 응답하고 뒤에서
+    /// 돌리므로, "PROCESSING"이면 완료를 폴링으로 확인해야 한다.
+    /// 이미 최적화된 방이면 서버가 실행하지 않고 "COMPLETED"로 답한다.
+    func startOptimization(roomId: Int, accessToken: String) async throws -> String {
+        var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/optimize")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            print("❌ 최적화 시작 응답: \(String(data: data, encoding: .utf8) ?? "")")
+            throw OptimizerError.serverError
+        }
+        return try JSONDecoder().decode(OptimizeStartResponse.self, from: data).optimizationStatus
     }
 
     // MARK: ✏️ 방 이름 수정 (PATCH /api/rooms/{room_id})
@@ -462,6 +482,36 @@ actor RoomOptimizerService {
         }
         print("📋 버전 목록 원본: \(String(data: data, encoding: .utf8) ?? "")")
         return try JSONDecoder().decode(ScanDetail.self, from: data)
+    }
+
+    // MARK: ✏️ 편집본 저장 (POST /api/rooms/{room_id}/versions)
+
+    private struct UserEditedVersionRequest: Encodable {
+        let parentVersionId: Int
+        let iosObjects: [FurniturePoseEdit]
+        enum CodingKeys: String, CodingKey {
+            case parentVersionId = "parent_version_id"
+            case iosObjects      = "ios_objects"
+        }
+    }
+
+    /// 앱에서 옮긴 가구를 새 "사용자 편집" 버전으로 저장한다. 서버가 Unity 좌표계 파일도 같이
+    /// 만들어주기 때문에, 저장한 편집본은 VR에서도 그대로 열린다.
+    func createUserEditedVersion(roomId: Int, parentVersionId: Int,
+                                 edits: [FurniturePoseEdit], accessToken: String) async throws {
+        var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/versions")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONEncoder().encode(
+            UserEditedVersionRequest(parentVersionId: parentVersionId, iosObjects: edits))
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("❌ 편집본 저장 응답(\(status)): \(String(data: data, encoding: .utf8) ?? "")")
+            throw APIError.from(statusCode: status, data: data)
+        }
     }
 
     // MARK: 🗂️ 내 공간 목록 (로그인 사용자 기준, 버전 상태 요약 포함)
@@ -536,12 +586,14 @@ enum OptimizerError: LocalizedError {
     case serverError
     case invalidResponse
     case timeout
+    case optimizationFailed
 
     var errorDescription: String? {
         switch self {
         case .serverError:     return "서버 오류가 발생했습니다"
         case .invalidResponse: return "응답 형식이 올바르지 않습니다"
         case .timeout:         return "최적화 시간이 초과되었습니다"
+        case .optimizationFailed: return "서버에서 최적화에 실패했습니다"
         }
     }
 }

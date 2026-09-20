@@ -6,16 +6,12 @@ import Foundation
 // 호출할지 판단하고, 결과를 자연어로 설명하는 역할만 한다. 실제 계산은 RoomFitCalculator가
 // 결정론적으로 수행한다 (AssistantViewModel이 tool_use를 받아 호출).
 //
-// 프로토타입 단계라 서버 프록시 없이 iOS가 Claude API를 직접 호출한다 (Meshy/Tripo와 동일한
-// 방식). 정식 서비스로 키울 때는 API 키만 서버 프록시로 옮기면 되고, 이 파일의 호출부는
-// 거의 그대로 재사용 가능하다.
+// Claude API 키는 앱에 두지 않는다 (앱을 뜯으면 키가 그대로 노출됨) — 로그인 토큰으로 우리
+// 서버를 호출하고, 서버가 자기 키로 Claude에 중계한다. 모델과 토큰 상한도 서버가 정한다.
 
 actor AssistantService {
 
-    static var apiKey: String = Bundle.main.object(forInfoDictionaryKey: "AnthropicAPIKey") as? String ?? ""
-
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private let model = "claude-sonnet-5"
+    private let endpoint = URL(string: "\(APIConfig.baseURL)/assistant/messages")!
 
     struct TurnResult {
         let assistantContent: [[String: Any]]   // 다음 턴에 그대로 대화 기록으로 넣을 원본 content
@@ -25,16 +21,16 @@ actor AssistantService {
 
     /// 대화 히스토리(messages)를 보내고 한 턴의 응답을 받는다. tool_use가 있으면 text는 nil일 수 있다.
     func send(messages: [[String: Any]], system: String) async throws -> TurnResult {
+        guard let accessToken = KeychainTokenStore.get(.accessToken) else {
+            throw AssistantError.apiError
+        }
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
-        req.setValue(Self.apiKey, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 30
 
         let body: [String: Any] = [
-            "model": model,
-            "max_tokens": 1024,
             "system": system,
             "messages": messages,
             "tools": Self.toolDefinitions
@@ -44,7 +40,7 @@ actor AssistantService {
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let msg = String(data: data, encoding: .utf8) ?? ""
-            print("❌ Claude API \((response as? HTTPURLResponse)?.statusCode ?? -1): \(msg)")
+            print("❌ AI 배치 상담 \((response as? HTTPURLResponse)?.statusCode ?? -1): \(msg)")
             throw AssistantError.apiError
         }
 

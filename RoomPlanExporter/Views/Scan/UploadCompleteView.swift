@@ -8,7 +8,6 @@ struct UploadCompleteView: View {
 
     @State private var name: String = ""
     @FocusState private var isFocused: Bool
-    @State private var saved = false
 
 
     private var spaceId: UUID? {
@@ -35,32 +34,14 @@ struct UploadCompleteView: View {
             .padding(.horizontal, 20)
             .voGlassBanner()
 
-            // 방 이름 + 저장하기
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    TextField("방 이름을 입력해주세요", text: $name)
-                        .focused($isFocused)
-                        .font(.title3.bold())
-                        .onSubmit { commitName() }
-                    Image(systemName: "pencil")
-                        .foregroundStyle(Color.voBlue)
-                }
-
-                Button {
-                    isFocused = false
-                    commitName()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: saved ? "checkmark" : "square.and.arrow.down")
-                        Text(saved ? "저장됨" : "저장하기")
-                    }
-                    .font(.semiBold12)
+            // 방 이름 — 완료 키, 내 방 보러가기, 메인으로를 누를 때 저장된다
+            HStack(spacing: 8) {
+                TextField("방 이름을 입력해주세요", text: $name)
+                    .focused($isFocused)
+                    .font(.title3.bold())
+                    .onSubmit { commitName() }
+                Image(systemName: "pencil")
                     .foregroundStyle(Color.voBlue)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.voBlue.opacity(0.12), in: Capsule())
-                }
-                .animation(.easeInOut(duration: 0.2), value: saved)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -69,19 +50,25 @@ struct UploadCompleteView: View {
                     .padding(.horizontal, 24)
             }
             .onAppear { name = vm.savedSpaces.first { $0.roomId == roomId }?.name ?? "내 공간" }
-            .onChange(of: name) { _, _ in saved = false }
 
             Divider()
 
-            // 3D 뷰어 — 저장 확정 전엔 로컬 렌더러, 확정되면 서버 색상이 반영된 렌더러로 전환
             ServerOriginalPreview(roomId: roomId, vm: vm)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // 하단 버튼
+            // 하단 버튼 — 저장까지가 한 흐름, 최적화·편집·AI 상담은 내 방 조회에서
             VStack(spacing: 12) {
-                Button("최적화 하기") {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                    Text("내 방에서 최적화, 가구 편집, AI 상담을 해볼 수 있어요")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+
+                Button("내 방 편집하러 가기") {
                     commitName()
-                    vm.requestOptimization(room: room, roomId: roomId)
+                    vm.openSavedRoom(roomId: roomId)
                 }
                 .buttonStyle(VOFilledButtonStyle())
 
@@ -105,20 +92,57 @@ struct UploadCompleteView: View {
                 vm.finalizeSave(roomId: roomId)
             }
         }
-        .alert("최적화 실패", isPresented: .constant(vm.optimizeError != nil), actions: {
-            Button("확인") { vm.optimizeError = nil }
-        }, message: {
-            Text(vm.optimizeError ?? "")
-        })
     }
 
     private func commitName() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let spaceId else { return }
         vm.updateSpaceName(trimmed, id: spaceId)
-        saved = true
         if vm.savedOriginalDetail == nil {
             vm.finalizeSave(roomId: roomId)
+        }
+    }
+}
+
+/// Original room always uses server assets, never a colored local placeholder.
+private struct ServerOriginalPreview: View {
+    let roomId: Int
+    @ObservedObject var vm: ScanViewModel
+    @State private var fetched: RoomVersionDetail?
+    @State private var error: String?
+    @State private var retry = 0
+
+    var body: some View {
+        Group {
+            if let detail = fetched ?? vm.savedOriginalDetail {
+                // 일부 가구 모델을 못 불러와도 OBB 박스로 대체돼서 화면은 정상 표시되므로,
+                // 사용자에게 굳이 오류를 보여주지 않고 콘솔 로그로만 남긴다.
+                FurnitureRealityKitView(detail: detail, isTransparent: true, allowsLocalFallback: false,
+                                        onAssetFailure: { print("⚠️ 가구 모델 로드 실패: \($0)") })
+                    .id("\(detail.renderingID)-\(retry)")
+            } else if let error {
+                VStack(spacing: 12) {
+                    Text(error).multilineTextAlignment(.center)
+                    Button("다시 불러오기") { retry += 1 }
+                }.padding()
+            } else {
+                ProgressView("서버의 원본 공간을 불러오는 중…")
+            }
+        }
+        .task(id: retry) {
+            guard vm.savedOriginalDetail == nil || retry > 0 else { return }
+            error = nil
+            guard let token = KeychainTokenStore.get(.accessToken) else {
+                error = "원본 공간을 조회할 정보가 없습니다. 내 공간에서 다시 열어주세요."
+                return
+            }
+            do {
+                fetched = try await RoomOptimizerService().fetchVersionDetail(
+                    roomId: roomId, versionType: "origin", accessToken: token)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = "서버 원본 공간을 아직 불러오지 못했어요. 잠시 후 다시 시도해주세요."
+            }
         }
     }
 }
