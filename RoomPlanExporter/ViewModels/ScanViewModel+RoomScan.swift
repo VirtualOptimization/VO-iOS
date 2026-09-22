@@ -5,9 +5,15 @@ import RoomPlan
 
 extension ScanViewModel {
 
-    func saveAndUpload(room: CapturedRoom) {
+    func saveAndUpload(room: CapturedRoom, name: String) {
+        let roomName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !roomName.isEmpty else {
+            uploadError = "방 이름을 입력해주세요."
+            return
+        }
         phase = .uploading(room)
         uploadError = nil
+        savedOriginalDetail = nil
         Task {
             do {
                 guard let accessToken = KeychainTokenStore.get(.accessToken) else {
@@ -24,7 +30,8 @@ extension ScanViewModel {
 
                 // 2. 업로드 세션 시작 (방을 현재 사용자와 연결)
                 print("🌐 [2/4] 업로드 세션 시작 (includeRoomUsdz=\(usdzExists), includeEmpty=\(emptyUsdzExists))")
-                let startResp = try await optimizer.startScanUpload(includeRoomUsdz: usdzExists,
+                let startResp = try await optimizer.startScanUpload(name: roomName,
+                                                                      includeRoomUsdz: usdzExists,
                                                                       includeRoomEmptyUsdz: emptyUsdzExists,
                                                                       accessToken: accessToken)
                 let roomId = startResp.roomId
@@ -42,10 +49,9 @@ extension ScanViewModel {
                     print("☁️ [3/4] 업로드 완료 \(slot.logicalName) (\(data.count) bytes)")
                 }
 
-                pendingRoomId = roomId
                 pendingUploadedKeys = startResp.uploads.map { $0.s3Key }
 
-                let space = SavedSpace(roomId: roomId)
+                let space = SavedSpace(name: roomName, roomId: roomId)
                 savedSpaces.insert(space, at: 0)
                 persistSpaces()
 
@@ -72,94 +78,110 @@ extension ScanViewModel {
         return try Data(contentsOf: fileURL)
     }
 
-    /// GET /rooms/{room_id}/optimized 폴링 → data_url(normalized.json) 나오면 바로 완료 (5초 간격, 최대 2시간)
+    /// GET /rooms/{room_id}/optimized 폴링 → data_url(normalized.json) 나오면 바로 완료 (5초 간격, 최대 2시간).
+    /// 서버가 실패로 표시하면 2시간을 기다리지 않고 바로 실패 처리한다.
     private func pollUntilComplete(roomId: Int, accessToken: String) async throws {
         let maxAttempts = 1440
         for attempt in 1...maxAttempts {
             try await Task.sleep(for: .seconds(5))
-            do {
-                let detail = try await optimizer.fetchVersionDetail(
-                    roomId: roomId, versionType: "optimized", accessToken: accessToken)
-                if detail.dataUrl != nil {
-                    print("✅ 폴링 \(attempt)/\(maxAttempts) – normalized.json 확인됨, GLB 안 기다리고 진행")
-                    return
-                }
-            } catch {
-                // 아직 없음 – 계속 폴링
+            if let detail = try? await optimizer.fetchVersionDetail(
+                roomId: roomId, versionType: "optimized", accessToken: accessToken),
+               detail.dataUrl != nil {
+                print("✅ 폴링 \(attempt)/\(maxAttempts) – normalized.json 확인됨, GLB 안 기다리고 진행")
+                return
+            }
+            if let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken),
+               status.optimizationStatus.uppercased() == "FAILED" {
+                throw OptimizerError.optimizationFailed
             }
             print("⏳ 폴링 \(attempt)/\(maxAttempts) – optimized 아직 없음")
         }
         throw OptimizerError.timeout
     }
 
-    // MARK: 최적화 요청 (UploadCompleteView 버튼)
+    // MARK: 최적화 요청 (내 방 조회의 "최적화하기" 버튼)
 
-    /// /complete 호출 → 파이프라인 시작 → 폴링 → 최적화 JSON 파싱 → OptimizedResultView
-    func requestOptimization(room: CapturedRoom, roomId: Int) {
+    /// 최적화 시작 → 완료까지 폴링 → 최적화 버전을 선택한 상태로 내 방 조회 화면 복귀
+    func optimizeRoom(from detail: ScanDetail) {
+        runOptimization(detail: detail) { roomId, accessToken in
+            try await self.optimizer.startOptimization(roomId: roomId, accessToken: accessToken)
+        }
+    }
+
+    /// 서버에서 이미 돌고 있는 최적화를 이어서 기다린다 (앱을 나갔다 들어온 경우)
+    func waitForRunningOptimization(detail: ScanDetail) {
+        runOptimization(detail: detail) { _, _ in "PROCESSING" }
+    }
+
+    private func runOptimization(detail: ScanDetail,
+                                 start: @escaping (Int, String) async throws -> String) {
         guard !isOptimizing else { return }
         isOptimizing = true
         optimizeError = nil
-        // 즉시 로딩 화면으로 전환
-        phase = .processing(room, roomId: roomId)
+        let roomId = detail.roomId
+        optimizingRoomIds.insert(roomId)
+        phase = .processing(roomId: roomId)
         Task {
-            defer { isOptimizing = false }
+            defer {
+                isOptimizing = false
+                optimizingRoomIds.remove(roomId)
+            }
             do {
                 guard let accessToken = KeychainTokenStore.get(.accessToken) else {
                     optimizeError = "로그인이 필요해요"
-                    phase = .uploadComplete(room, roomId: roomId)
+                    phase = .inquiryResult(detail)
                     return
                 }
-
-                // 1. POST /api/rooms/{room_id}/complete → 업로드 완료 확인 + 파이프라인 트리거
-                print("최적화 요청 – roomId=\(roomId), uploadedKeys=\(pendingUploadedKeys)")
-                let resp = try await optimizer.completeScanUpload(roomId: roomId, uploadedKeys: pendingUploadedKeys, accessToken: accessToken)
-                print("pipelineStarted=\(resp.pipelineStarted)")
-
-                // pipelineStarted=false → 파이프라인 미시작 (BE ARN 미설정 등)
-                // 폴링해도 optimized가 /versions에 절대 안 뜨므로 즉시 복귀
-                guard resp.pipelineStarted else {
-                    print("pipelineStarted=false – BE의 Step Functions ARN 설정 필요")
-                    optimizeError = "최적화 파이프라인이 서버에서 아직 시작되지 않았어요.\n(서버 설정 문제일 수 있어요 — 잠시 후 다시 시도해주세요)"
-                    phase = .uploadComplete(room, roomId: roomId)
-                    return
+                let status = try await start(roomId, accessToken)
+                if status.uppercased() != "COMPLETED" {
+                    try await pollUntilComplete(roomId: roomId, accessToken: accessToken)
                 }
-
-                // 2. optimized가 /versions에 뜰 때까지 폴링 (5초 간격, 최대 5분)
-                print("최적화 폴링 시작...")
-                try await pollUntilComplete(roomId: roomId, accessToken: accessToken)
-                print("최적화 완료")
-
-                // 3. optimized 버전 상세 → OptimizedResultView (FurnitureRealityKitView가 직접 렌더링)
-                let versionDetail = try await optimizer.fetchVersionDetail(
-                    roomId: roomId, versionType: "optimized", accessToken: accessToken)
-                print("최적화 버전 상세 취득 – OptimizedResultView로 이동")
-                phase = .optimized(room, versionDetail)
-
+                let updated = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
+                phase = .inquiryResult(updated, focusVersionType: "OPTIMIZED")
+                syncRoomsWithServer()
             } catch {
-                guard !Task.isCancelled else { return }   // 사용자가 취소한 경우 – 이미 이전 화면으로 이동했으므로 조용히 종료
-                print("최적화 요청 실패: \(error)")
-                // 에러 시 UploadCompleteView로 복귀
-                optimizeError = "최적화 요청에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
-                phase = .uploadComplete(room, roomId: roomId)
+                print("❌ 최적화 실패: \(error)")
+                optimizeError = "최적화에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                phase = .inquiryResult(detail)
+            }
+        }
+    }
+
+    /// 원본 버전만 서버에 확정하고(최적화는 내 방 조회에서 따로 요청) 색상이 반영된 서버 카탈로그로
+    /// 조회할 수 있도록 방금 확정된 원본 버전 상세를 받아온다.
+    func finalizeSave(roomId: Int) {
+        guard let accessToken = KeychainTokenStore.get(.accessToken) else { return }
+        Task {
+            do {
+                _ = try await optimizer.completeScanUpload(
+                    roomId: roomId, uploadedKeys: pendingUploadedKeys, accessToken: accessToken)
+                let detail = try await optimizer.fetchVersionDetail(roomId: roomId, versionType: "origin", accessToken: accessToken)
+                savedOriginalDetail = detail
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("⚠️ 저장 확정 실패 (색상 반영된 뷰어로 전환 못함): \(error)")
             }
         }
     }
 
     // MARK: 공간 목록 관리
 
-    func updateSpaceName(_ name: String, id: UUID) {
-        guard let idx = savedSpaces.firstIndex(where: { $0.id == id }) else { return }
-        savedSpaces[idx].name = name
-        persistSpaces()
+    func updateSpaceName(_ name: String, roomId: Int) {
+        let roomName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !roomName.isEmpty else { return }
+        if let idx = savedSpaces.firstIndex(where: { $0.roomId == roomId }) {
+            savedSpaces[idx].name = roomName
+            persistSpaces()
+        }
 
-        // 서버에도 반영 (다른 기기/재설치 후에도 이름 유지) – best-effort, 실패해도 로컬은 이미 저장됨
-        let roomId = savedSpaces[idx].roomId
+        // 서버에도 반영해서 다른 기기나 재설치 후에도 같은 이름을 사용한다.
         guard let accessToken = KeychainTokenStore.get(.accessToken) else { return }
         Task {
             do {
-                try await optimizer.updateRoomName(roomId: roomId, name: name, accessToken: accessToken)
+                try await optimizer.updateRoomName(roomId: roomId, name: roomName, accessToken: accessToken)
             } catch {
-                print("⚠️ 방 이름 서버 동기화 실패 (로컬은 유지됨): \(error)")
+                print("⚠️ 방 이름 서버 동기화 실패: \(error)")
+                inquiryError = "방 이름을 서버에 저장하지 못했어요. 잠시 후 다시 시도해주세요."
             }
         }
     }
@@ -186,6 +208,25 @@ extension ScanViewModel {
             }
             roomStatus = Dictionary(uniqueKeysWithValues: rooms.map { ($0.roomId, $0) })
             persistSpaces()
+
+            // 최적화 결과가 아직 없는 방만 상태를 확인해서, 서버에서 돌고 있는 중이면 목록에 표시한다.
+            let pending = rooms.filter { !$0.hasOptimized }.map(\.roomId)
+            guard !pending.isEmpty else {
+                optimizingRoomIds = []
+                return
+            }
+            let running = await withTaskGroup(of: Int?.self) { group -> Set<Int> in
+                for roomId in pending {
+                    group.addTask { [optimizer] in
+                        let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken)
+                        return status?.optimizationStatus.uppercased() == "PROCESSING" ? roomId : nil
+                    }
+                }
+                var ids: Set<Int> = []
+                for await roomId in group { if let roomId { ids.insert(roomId) } }
+                return ids
+            }
+            optimizingRoomIds = running
         }
     }
 

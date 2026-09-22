@@ -29,13 +29,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>방 스캔 및 가구 촬영을 위해 카메라가 필요합니다.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>가구 동영상 촬영을 위해 마이크가 필요합니다.</string>
-	<key>TripoAPIKey</key>
-	<string>$(TRIPO_API_KEY)</string>
-	<key>MeshyAPIKey</key>
-	<string>$(MESHY_API_KEY)</string>
+	<string>방 스캔을 위해 카메라가 필요합니다.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>This app does not use calendar access.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

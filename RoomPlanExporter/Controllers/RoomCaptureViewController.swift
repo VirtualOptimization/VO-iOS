@@ -15,6 +15,8 @@ import SwiftUI
 protocol RoomCaptureViewControllerDelegate: AnyObject {
     func roomCaptureDidFinish(_ capturedRoom: CapturedRoom)
     func roomCaptureDidCancel()
+    /// 세션 오류 또는 RoomBuilder 재구성 실패 (스캔 데이터 부족 등) — 사용자가 직접 취소한 것과 구분
+    func roomCaptureDidFail(_ error: Error)
 }
 
 // MARK: - RoomCaptureViewController
@@ -116,7 +118,6 @@ class RoomCaptureViewController: UIViewController {
     @objc private func cancelTapped() {
         stopSession()
         delegate?.roomCaptureDidCancel()
-        dismiss(animated: true)
     }
 }
 
@@ -140,25 +141,22 @@ extension RoomCaptureViewController: RoomCaptureSessionDelegate {
         if let error {
             print("스캔 종료 오류: \(error.localizedDescription)")
             DispatchQueue.main.async {
-                self.delegate?.roomCaptureDidCancel()
-                self.dismiss(animated: true)
+                self.delegate?.roomCaptureDidFail(error)
             }
             return
         }
-        
+
         // RoomBuilder로 CapturedRoom 생성
         Task {
             do {
                 let capturedRoom = try await roomBuilder.capturedRoom(from: data)
                 await MainActor.run {
                     self.delegate?.roomCaptureDidFinish(capturedRoom)
-                    self.dismiss(animated: true)
                 }
             } catch {
                 print("RoomBuilder 오류: \(error.localizedDescription)")
                 await MainActor.run {
-                    self.delegate?.roomCaptureDidCancel()
-                    self.dismiss(animated: true)
+                    self.delegate?.roomCaptureDidFail(error)
                 }
             }
         }
@@ -172,9 +170,10 @@ struct RoomCaptureViewControllerRepresentable: UIViewControllerRepresentable {
     
     var onFinish: (CapturedRoom) -> Void
     var onCancel: () -> Void
-    
+    var onFail: (Error) -> Void = { _ in }
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(onFinish: onFinish, onCancel: onCancel)
+        Coordinator(onFinish: onFinish, onCancel: onCancel, onFail: onFail)
     }
     
     func makeUIViewController(context: Context) -> RoomCaptureViewController {
@@ -190,18 +189,24 @@ struct RoomCaptureViewControllerRepresentable: UIViewControllerRepresentable {
     class Coordinator: NSObject, RoomCaptureViewControllerDelegate {
         var onFinish: (CapturedRoom) -> Void
         var onCancel: () -> Void
-        
-        init(onFinish: @escaping (CapturedRoom) -> Void, onCancel: @escaping () -> Void) {
+        var onFail: (Error) -> Void
+
+        init(onFinish: @escaping (CapturedRoom) -> Void, onCancel: @escaping () -> Void, onFail: @escaping (Error) -> Void) {
             self.onFinish = onFinish
             self.onCancel = onCancel
+            self.onFail = onFail
         }
-        
+
         func roomCaptureDidFinish(_ capturedRoom: CapturedRoom) {
             onFinish(capturedRoom)
         }
-        
+
         func roomCaptureDidCancel() {
             onCancel()
+        }
+
+        func roomCaptureDidFail(_ error: Error) {
+            onFail(error)
         }
     }
 }
