@@ -131,6 +131,27 @@ struct InquiryResultView: View {
 
                 viewerContent
             }
+            .overlay(alignment: .topTrailing) {
+                if mode == .normal {
+                    Button { showVersionSheet = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: selectedVersion?.systemIcon ?? "doc")
+                            Text(selectedVersion?.displayName ?? "버전 선택")
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voBlue)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 42)
+                        .voGlassCardWhite(cornerRadius: 14)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 12)
+                    .padding(.trailing, 16)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if mode == .edit {
                     VStack(alignment: .trailing, spacing: 8) {
@@ -181,32 +202,14 @@ struct InquiryResultView: View {
             if mode == .normal {
                 Divider()
 
-                VStack(spacing: 12) {
-                    // 3D 뷰를 가리지 않도록 기능 버튼을 아래로 내려 가로로 나란히 둔다
-                    HStack(spacing: 8) {
-                        toolbarButton("최적화", icon: "sparkles",
-                                      isEnabled: !isViewingOptimized) { optimize() }
-                        toolbarButton("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right",
-                                      isEnabled: currentDataURL != nil) { mode = .edit }
-                        toolbarButton("AI 상담", icon: "bubble.left.and.bubble.right.fill",
-                                      isEnabled: currentDataURL != nil) { enterAssistantMode() }
-                    }
-
-                    // 버전은 늘 펼쳐두지 않고 필요할 때만 시트로 — 3D 뷰 영역을 더 넓게 씀
-                    HStack(spacing: 10) {
-                        Button { showVersionSheet = true } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: selectedVersion?.systemIcon ?? "doc")
-                                Text(selectedVersion?.displayName ?? "버전 선택")
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                        }
-                        .buttonStyle(VOOutlineButtonStyle())
-
-                        Button("메인으로") { vm.retake() }
-                            .buttonStyle(VOFilledButtonStyle())
-                    }
+                // 3D 뷰를 가리지 않도록 주요 기능만 아래에 가로로 둔다.
+                HStack(spacing: 8) {
+                    toolbarButton("최적화", icon: "sparkles",
+                                  isEnabled: !isViewingOptimized) { optimize() }
+                    toolbarButton("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right",
+                                  isEnabled: currentDataURL != nil) { mode = .edit }
+                    toolbarButton("AI 상담", icon: "bubble.left.and.bubble.right.fill",
+                                  isEnabled: currentDataURL != nil) { enterAssistantMode() }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
@@ -314,10 +317,18 @@ struct InquiryResultView: View {
                 .frame(maxWidth: .infinity)
 
             HStack {
-                Image("logo_white")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 42)
+                Button { vm.retake() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("이전 화면")
+                .padding(.top, 6)
+
                 Spacer()
 
                 Button { showRoomActions = true } label: {
@@ -325,7 +336,6 @@ struct InquiryResultView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white)
                         .frame(width: 36, height: 36)
-                        .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
