@@ -10,6 +10,77 @@ import SwiftUI
 import RealityKit
 import RoomPlan
 
+/// 모든 공간 뷰어가 같은 카메라 조작 방식을 쓰도록 하는 공통 컨트롤러.
+/// 방 엔티티는 움직이지 않고 카메라만 원점을 중심으로 회전·기울기·줌을 변경한다.
+final class RoomOrbitCamera {
+    weak var camera: PerspectiveCamera?
+    private var yaw: Float = 0
+    private var pitch: Float = .pi / 4
+    private var distance: Float = 8
+    private var pinchStartDistance: Float = 8
+
+    func attach(_ camera: PerspectiveCamera) {
+        self.camera = camera
+        syncFromCamera()
+    }
+
+    func setPosition(_ position: SIMD3<Float>) {
+        guard let camera else { return }
+        camera.position = position
+        camera.look(at: .zero, from: position, relativeTo: nil)
+        syncFromCamera()
+    }
+
+    func setPose(yaw: Float, pitch: Float, distance: Float) {
+        self.yaw = yaw
+        self.pitch = pitch
+        self.distance = distance
+        apply()
+    }
+
+    func syncFromCamera() {
+        guard let position = camera?.position else { return }
+        let newDistance = max(length(position), 0.001)
+        distance = newDistance
+        pitch = asin(min(max(position.y / newDistance, -1), 1))
+        yaw = atan2(position.x, position.z)
+        pinchStartDistance = distance
+    }
+
+    func pan(_ translation: CGPoint) {
+        yaw -= Float(translation.x) * 0.006
+        let proposedPitch = pitch + Float(translation.y) * 0.004
+        let minimumPitch: Float = .pi * 0.16
+        let maximumPitch: Float = .pi * 0.47
+        pitch = min(max(proposedPitch, minimumPitch), maximumPitch)
+        apply()
+    }
+
+    func pinchBegan() {
+        pinchStartDistance = distance
+    }
+
+    func pinch(scale: CGFloat) {
+        distance = min(max(pinchStartDistance / Float(scale), 2.5), 30)
+        apply()
+    }
+
+    func rotate(by angle: Float) {
+        yaw -= angle
+        apply()
+    }
+
+    private func apply() {
+        guard let camera else { return }
+        let horizontal = cos(pitch) * distance
+        let position = SIMD3<Float>(sin(yaw) * horizontal,
+                                    sin(pitch) * distance,
+                                    cos(yaw) * horizontal)
+        camera.position = position
+        camera.look(at: .zero, from: position, relativeTo: nil)
+    }
+}
+
 extension CapturedRoom.ModelProvider {
     enum CatalogError: LocalizedError {
         case cannotFindCatalog
@@ -150,6 +221,7 @@ struct RealityKitRoomView: UIViewRepresentable {
         camera.look(at: .zero, from: camera.position, relativeTo: nil)
         camAnchor.addChild(camera)
         arView.scene.addAnchor(camAnchor)
+        context.coordinator.orbitCamera.attach(camera)
 
         setupLighting(in: arView)
 
@@ -337,9 +409,14 @@ struct RealityKitRoomView: UIViewRepresentable {
     // MARK: - 제스처
 
     private func setupGestures(in arView: ARView, coordinator: Coordinator) {
-        arView.addGestureRecognizer(UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.handlePinch)))
-        arView.addGestureRecognizer(UIRotationGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleRotation)))
-        arView.addGestureRecognizer(UIPanGestureRecognizer(target: coordinator, action: #selector(Coordinator.handlePan)))
+        let pinch = UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.handlePinch))
+        let rotation = UIRotationGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleRotation))
+        let pan = UIPanGestureRecognizer(target: coordinator, action: #selector(Coordinator.handlePan))
+        pan.maximumNumberOfTouches = 2
+        [pinch, rotation, pan].forEach {
+            $0.delegate = coordinator
+            arView.addGestureRecognizer($0)
+        }
     }
 
     // MARK: - 카테고리별 색상
@@ -360,32 +437,34 @@ struct RealityKitRoomView: UIViewRepresentable {
 
     // MARK: - Coordinator
 
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
         var hasAppliedOptimization: Bool = false
-        private var lastScale: Float = 1.0
-        private var currentScale: Float = 1.0
+        let orbitCamera = RoomOrbitCamera()
         private var lastRotation: Float = 0
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
-            if g.state == .began { lastScale = currentScale }
-            currentScale = max(0.3, min(6.0, lastScale * Float(g.scale)))
-            roomAnchor?.scale = SIMD3(repeating: currentScale)
+            if g.state == .began { orbitCamera.pinchBegan() }
+            orbitCamera.pinch(scale: g.scale)
         }
 
         @objc func handleRotation(_ g: UIRotationGestureRecognizer) {
             if g.state == .began { lastRotation = 0 }
             let delta = Float(g.rotation) - lastRotation
             lastRotation = Float(g.rotation)
-            roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+            orbitCamera.rotate(by: delta)
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
-            let delta = Float(g.translation(in: arView).x) * 0.005
-            roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+            orbitCamera.pan(g.translation(in: arView))
             g.setTranslation(.zero, in: arView)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
@@ -415,6 +494,7 @@ struct JsonRealityKitView: UIViewRepresentable {
         camera.look(at: .zero, from: camera.position, relativeTo: nil)
         camAnchor.addChild(camera)
         arView.scene.addAnchor(camAnchor)
+        context.coordinator.orbitCamera.attach(camera)
 
         // 조명
         let lightAnchor = AnchorEntity(world: .zero)
@@ -437,9 +517,14 @@ struct JsonRealityKitView: UIViewRepresentable {
         Task { @MainActor in await buildScene(into: roomAnchor) }
 
         // 제스처
-        arView.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator,    action: #selector(Coordinator.handlePinch)))
-        arView.addGestureRecognizer(UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation)))
-        arView.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator,      action: #selector(Coordinator.handlePan)))
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch))
+        let rotation = UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation))
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        pan.maximumNumberOfTouches = 2
+        [pinch, rotation, pan].forEach {
+            $0.delegate = context.coordinator
+            arView.addGestureRecognizer($0)
+        }
 
         return arView
     }
@@ -587,31 +672,33 @@ struct JsonRealityKitView: UIViewRepresentable {
     }
 
     // MARK: Coordinator
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
-        private var lastScale: Float = 1.0
-        private var currentScale: Float = 1.0
+        let orbitCamera = RoomOrbitCamera()
         private var lastRotation: Float = 0
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
-            if g.state == .began { lastScale = currentScale }
-            currentScale = max(0.3, min(6.0, lastScale * Float(g.scale)))
-            roomAnchor?.scale = SIMD3(repeating: currentScale)
+            if g.state == .began { orbitCamera.pinchBegan() }
+            orbitCamera.pinch(scale: g.scale)
         }
 
         @objc func handleRotation(_ g: UIRotationGestureRecognizer) {
             if g.state == .began { lastRotation = 0 }
             let delta = Float(g.rotation) - lastRotation
             lastRotation = Float(g.rotation)
-            roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+            orbitCamera.rotate(by: delta)
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
-            let delta = Float(g.translation(in: arView).x) * 0.005
-            roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+            orbitCamera.pan(g.translation(in: arView))
             g.setTranslation(.zero, in: arView)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
@@ -637,6 +724,7 @@ struct UsdzRealityKitView: UIViewRepresentable {
         camera.look(at: .zero, from: camera.position, relativeTo: nil)
         camAnchor.addChild(camera)
         arView.scene.addAnchor(camAnchor)
+        context.coordinator.orbitCamera.attach(camera)
 
         // 조명
         let lightAnchor = AnchorEntity(world: .zero)
@@ -667,9 +755,14 @@ struct UsdzRealityKitView: UIViewRepresentable {
         }
 
         // 제스처
-        arView.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator,    action: #selector(Coordinator.handlePinch)))
-        arView.addGestureRecognizer(UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation)))
-        arView.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator,      action: #selector(Coordinator.handlePan)))
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch))
+        let rotation = UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation))
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        pan.maximumNumberOfTouches = 2
+        [pinch, rotation, pan].forEach {
+            $0.delegate = context.coordinator
+            arView.addGestureRecognizer($0)
+        }
 
         return arView
     }
@@ -677,78 +770,106 @@ struct UsdzRealityKitView: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {}
 
     // MARK: Coordinator (핀치·회전·팬)
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
-        private var lastScale: Float = 1.0
-        private var currentScale: Float = 1.0
+        let orbitCamera = RoomOrbitCamera()
         private var lastRotation: Float = 0
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
-            if g.state == .began { lastScale = currentScale }
-            currentScale = max(0.3, min(6.0, lastScale * Float(g.scale)))
-            roomAnchor?.scale = SIMD3(repeating: currentScale)
+            if g.state == .began { orbitCamera.pinchBegan() }
+            orbitCamera.pinch(scale: g.scale)
         }
 
         @objc func handleRotation(_ g: UIRotationGestureRecognizer) {
             if g.state == .began { lastRotation = 0 }
             let delta = Float(g.rotation) - lastRotation
             lastRotation = Float(g.rotation)
-            roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+            orbitCamera.rotate(by: delta)
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
-            let delta = Float(g.translation(in: arView).x) * 0.005
-            roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+            orbitCamera.pan(g.translation(in: arView))
             g.setTranslation(.zero, in: arView)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
 
 // MARK: - 가구 편집 핸들바
 //
-// 3D 화면을 직접 탭/드래그해서 가구를 옮기면 시점 각도나 히트테스트 정확도에 따라 결과가
-// 들쭉날쭉해지기 쉽다. 대신 화면 오른쪽에 고정된 이 패드를 밀면, 민 방향 그대로 가구가
-// 움직여서 훨씬 예측 가능하다 — 가구가 선택됐을 때만 나타난다.
+// Planner 5D / IKEA Kreativ처럼 가구 자체를 끌어서 이동하는 방식을 주 조작으로 사용한다.
+// 선택하면 아래에는 시야를 가리지 않는 작은 회전 액션 바만 나타난다.
 
 final class FurnitureNudgeHandle: UIView {
-    /// 이 패드 위에서 드래그한 화면 좌표 델타(pt) — 매 변화마다 호출
-    var onMove: ((CGPoint) -> Void)?
+    /// 양수면 시계 방향, 음수면 반시계 방향 회전.
+    var onRotate: ((Float) -> Void)?
 
-    private let knob = UIView()
+    private let rotateLeftButton = UIButton(type: .system)
+    private let instructionLabel = UILabel()
+    private let rotateRightButton = UIButton(type: .system)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor.black.withAlphaComponent(0.28)
-        layer.cornerRadius = 34
         translatesAutoresizingMaskIntoConstraints = false
+        backgroundColor = UIColor.black.withAlphaComponent(0.40)
+        layer.cornerRadius = 28
+        layer.borderWidth = 1
+        layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
 
-        knob.backgroundColor = UIColor.white.withAlphaComponent(0.9)
-        knob.layer.cornerRadius = 16
-        knob.isUserInteractionEnabled = false
-        knob.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(knob)
+        configureRotateButton(rotateLeftButton, symbol: "rotate.left", label: "왼쪽으로 90도 회전")
+        configureRotateButton(rotateRightButton, symbol: "rotate.right", label: "오른쪽으로 90도 회전")
+        rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
+        rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
+
+        instructionLabel.text = "선택됨 · 끌어서 이동"
+        instructionLabel.textColor = .white
+        instructionLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        instructionLabel.textAlignment = .center
+        instructionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        [rotateLeftButton, instructionLabel, rotateRightButton].forEach(addSubview)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 68),
-            heightAnchor.constraint(equalToConstant: 68),
-            knob.widthAnchor.constraint(equalToConstant: 32),
-            knob.heightAnchor.constraint(equalToConstant: 32),
-            knob.centerXAnchor.constraint(equalTo: centerXAnchor),
-            knob.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+            widthAnchor.constraint(equalToConstant: 248),
+            heightAnchor.constraint(equalToConstant: 56),
 
-        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(handlePan)))
+            rotateLeftButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            rotateLeftButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rotateLeftButton.widthAnchor.constraint(equalToConstant: 44),
+            rotateLeftButton.heightAnchor.constraint(equalToConstant: 44),
+
+            instructionLabel.leadingAnchor.constraint(equalTo: rotateLeftButton.trailingAnchor, constant: 8),
+            instructionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            rotateRightButton.leadingAnchor.constraint(equalTo: instructionLabel.trailingAnchor, constant: 8),
+            rotateRightButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            rotateRightButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rotateRightButton.widthAnchor.constraint(equalToConstant: 44),
+            rotateRightButton.heightAnchor.constraint(equalToConstant: 44),
+        ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    @objc private func handlePan(_ g: UIPanGestureRecognizer) {
-        let delta = g.translation(in: self)
-        g.setTranslation(.zero, in: self)
-        onMove?(delta)
+    func cancelActivePress() {}
+
+    private func configureRotateButton(_ button: UIButton, symbol: String, label: String) {
+        button.setImage(UIImage(systemName: symbol), for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor.white.withAlphaComponent(0.16)
+        button.layer.cornerRadius = 22
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.accessibilityLabel = label
     }
+
+    @objc private func rotateLeftTapped()  { onRotate?(-.pi / 2) }
+    @objc private func rotateRightTapped() { onRotate?(.pi / 2) }
 }
 
 // MARK: - FurnitureRealityKitView (rooms API 버전 상세 기반 3D 뷰어)
@@ -769,7 +890,15 @@ struct FurniturePoseEdit: Encodable {
 @MainActor
 final class FurnitureEditSession: ObservableObject {
     fileprivate var collect: (() -> [FurniturePoseEdit])?
+    fileprivate var cancel: (() -> Void)?
+    fileprivate var restoreVisibility: (() -> Void)?
+    fileprivate var applyHiddenIdentifiers: ((Set<String>) -> Void)?
     func pendingEdits() -> [FurniturePoseEdit] { collect?() ?? [] }
+    func cancelPendingEdits() { cancel?() }
+    func restoreFurnitureVisibility() { restoreVisibility?() }
+    func setHiddenFurnitureIdentifiers(_ identifiers: Set<String>) {
+        applyHiddenIdentifiers?(identifiers)
+    }
 }
 
 struct FurnitureRealityKitView: UIViewRepresentable {
@@ -811,6 +940,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         camAnchor.addChild(camera)
         arView.scene.addAnchor(camAnchor)
         context.coordinator.camera = camera     // 동적 조정용
+        context.coordinator.orbitCamera.attach(camera)
 
         // 조명
         let lightAnchor = AnchorEntity(world: .zero)
@@ -831,27 +961,56 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         // 씬 빌드 (비동기) – coordinator 전달로 카메라 거리 조정 가능
         let coord = context.coordinator
-        coord.editMode = editMode
+        coord.setEditMode(editMode)
         editSession?.collect = { [weak coord] in coord?.collectPoseEdits() ?? [] }
-        Task { @MainActor in await buildScene(into: roomAnchor, coordinator: coord) }
+        editSession?.cancel = { [weak coord] in coord?.resetFurnitureToBaseline() }
+        editSession?.restoreVisibility = { [weak coord] in coord?.showAllFurniture() }
+        editSession?.applyHiddenIdentifiers = { [weak coord] identifiers in
+            coord?.setHiddenFurnitureIdentifiers(identifiers)
+        }
+        coord.sceneTask = Task { @MainActor in
+            await buildScene(into: roomAnchor, coordinator: coord)
+        }
 
         // 제스처 — editMode는 SwiftUI 상태 변경으로 나중에 켜질 수 있고 makeUIView는 다시 안
         // 불리므로, 제스처 자체는 항상 등록해두고 동작 여부는 매번 coordinator.editMode로 판단한다.
         // pan/pinch/rotation은 항상 카메라 전용 — 가구 조작이 더 이상 연속 드래그가 아니라서 경쟁이 없다.
-        arView.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan)))
-        arView.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch)))
-        arView.addGestureRecognizer(UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation)))
-        arView.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap)))
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        panGesture.maximumNumberOfTouches = 1
+        panGesture.delegate = context.coordinator
+        panGesture.cancelsTouchesInView = false
+        arView.addGestureRecognizer(panGesture)
+        let cameraPanGesture = UIPanGestureRecognizer(target: context.coordinator,
+                                                      action: #selector(Coordinator.handleCameraPan))
+        cameraPanGesture.minimumNumberOfTouches = 2
+        cameraPanGesture.maximumNumberOfTouches = 2
+        cameraPanGesture.delegate = context.coordinator
+        cameraPanGesture.cancelsTouchesInView = false
+        arView.addGestureRecognizer(cameraPanGesture)
+        let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator,
+                                                    action: #selector(Coordinator.handlePinch))
+        pinchGesture.delegate = context.coordinator
+        pinchGesture.cancelsTouchesInView = false
+        arView.addGestureRecognizer(pinchGesture)
+        let rotationGesture = UIRotationGestureRecognizer(target: context.coordinator,
+                                                          action: #selector(Coordinator.handleRotation))
+        rotationGesture.delegate = context.coordinator
+        rotationGesture.cancelsTouchesInView = false
+        arView.addGestureRecognizer(rotationGesture)
+        let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+        tapGesture.delegate = context.coordinator
+        tapGesture.cancelsTouchesInView = false
+        arView.addGestureRecognizer(tapGesture)
 
-        // 가구 편집 핸들바 — 가구가 선택됐을 때만 오른쪽 중간에 나타남
+        // 가구 편집 도구 — 방과 가구를 가리지 않도록 선택됐을 때 화면 아래 중앙에 나타난다.
         let handle = FurnitureNudgeHandle()
         handle.isHidden = true
         arView.addSubview(handle)
         NSLayoutConstraint.activate([
-            handle.trailingAnchor.constraint(equalTo: arView.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            handle.centerYAnchor.constraint(equalTo: arView.centerYAnchor),
+            handle.centerXAnchor.constraint(equalTo: arView.centerXAnchor),
+            handle.bottomAnchor.constraint(equalTo: arView.safeAreaLayoutGuide.bottomAnchor, constant: -18),
         ])
-        handle.onMove = { [weak coord] delta in coord?.nudgeSelectedEntity(by: delta) }
+        handle.onRotate = { [weak coord] angle in coord?.rotateSelectedEntity(by: angle) }
         coord.nudgeHandle = handle
 
         return arView
@@ -860,16 +1019,22 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {
         let coordinator = context.coordinator
         if coordinator.editMode != editMode {
-            coordinator.editMode = editMode
-            if !editMode {
-                coordinator.deselect()   // 편집 모드 나가면 선택 표시(확대 강조) 원복
-            }
+            coordinator.setEditMode(editMode)
         }
         // 채팅에서 "이 가구 빼면?" 물어볼 때마다 hiddenIdentifiers가 바뀌고, 여기서 그 가구만
         // 실제로 껐다 켠다 (재생성 없이 바로 반영 — 대화하면서 즉시 확인 가능하게).
         for (id, entity) in coordinator.entitiesByIdentifier {
             entity.isEnabled = !hiddenIdentifiers.contains(id)
         }
+    }
+
+    static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
+        coordinator.sceneTask?.cancel()
+        coordinator.deselect()
+        coordinator.entitiesByIdentifier.removeAll()
+        coordinator.identifierByEntity.removeAll()
+        coordinator.poseBaseline.removeAll()
+        coordinator.arView = nil
     }
 
     // MARK: 씬 구성
@@ -1103,12 +1268,23 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 placedEntity.generateCollisionShapes(recursive: true)
                 // AI 배치 상담의 가구 제외 시뮬레이션이 나중에 켜고 끌 수 있도록 식별자로 등록
                 coordinator.entitiesByIdentifier[obj.identifier] = placedEntity
+                coordinator.identifierByEntity[ObjectIdentifier(placedEntity)] = obj.identifier
                 // 편집 저장 때 "얼마나 움직였는지" 비교할 기준값. applyTransform이 모델 중심을
                 // 맞추려고 위치를 pivot만큼 밀어놨을 수 있어서, 그 보정량도 같이 기억해둔다.
+                let renderedBounds = placedEntity.visualBounds(relativeTo: anchor)
+                let renderedSize = renderedBounds.max - renderedBounds.min
+                let rawDimensions = obj.dimensions ?? []
+                let collisionDimensions = SIMD3<Float>(
+                    rawDimensions.indices.contains(0) && rawDimensions[0] > 0 ? rawDimensions[0] : renderedSize.x,
+                    rawDimensions.indices.contains(1) && rawDimensions[1] > 0 ? rawDimensions[1] : renderedSize.y,
+                    rawDimensions.indices.contains(2) && rawDimensions[2] > 0 ? rawDimensions[2] : renderedSize.z
+                )
                 coordinator.poseBaseline[obj.identifier] = Coordinator.PoseBaseline(
                     centerOffset: placedEntity.orientation.inverse.act(worldPos - placedEntity.position),
                     center: worldPos,
-                    yaw: Coordinator.serverYaw(of: placedEntity.orientation)
+                    yaw: Coordinator.serverYaw(of: placedEntity.orientation),
+                    transform: placedEntity.transform,
+                    dimensions: collisionDimensions
                 )
                 // Preserve server coordinates on load. Wall clamping belongs to
                 // explicit user edits; independently pushing objects creates overlaps.
@@ -1265,10 +1441,18 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         let minZ = zs.min()!, maxZ = zs.max()!
         let minY = ys.min()!
         anchor.position = SIMD3(-(minX + maxX) / 2, -minY, -(minZ + maxZ) / 2)
-        let roomSize = max(maxX - minX, maxZ - minZ)
+        // 중심점만으로 크기를 재면 벽 끝이나 큰 가구의 바깥쪽이 빠져 편집 화면에서 잘릴 수 있다.
+        // 실제 렌더링 바운드까지 포함해 여유 있는 카메라 거리를 계산한다.
+        let visualBounds = anchor.visualBounds(relativeTo: anchor)
+        let visualSize = visualBounds.max - visualBounds.min
+        let roomSize = max(max(maxX - minX, maxZ - minZ), max(visualSize.x, visualSize.z))
         let dist = min(max(roomSize * 0.75 + 2.5, 4.0), 14.0)
-        coordinator.camera?.position = SIMD3(0, dist, dist)
-        coordinator.camera?.look(at: .zero, from: SIMD3(0, dist, dist), relativeTo: nil)
+        coordinator.defaultCameraDistance = dist
+        if coordinator.editMode {
+            coordinator.applyTopDownCamera(roomSize: roomSize)
+        } else {
+            coordinator.orbitCamera.setPosition(SIMD3(0, dist, dist))
+        }
     }
 
     /// 모델에 transform 적용 (bounds 스케일링 포함)
@@ -1378,13 +1562,17 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     }
 
     // MARK: Coordinator
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
         var camera: PerspectiveCamera?          // 카메라 거리 동적 조정용
-        var editMode: Bool = false
+        let orbitCamera = RoomOrbitCamera()
+        private(set) var editMode: Bool = false
+        var defaultCameraDistance: Float = 6
+        var sceneTask: Task<Void, Never>?
         /// identifier → 배치된 엔티티. AI 배치 상담의 가구 제외 시뮬레이션이 이걸로 보이기/숨기기 전환
         var entitiesByIdentifier: [String: Entity] = [:]
+        var identifierByEntity: [ObjectIdentifier: String] = [:]
 
         /// 씬을 만들 때의 가구 자세 — 저장할 때 실제로 움직인 가구만 골라내는 기준이 된다.
         struct PoseBaseline {
@@ -1392,6 +1580,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let centerOffset: SIMD3<Float>
             let center: SIMD3<Float>
             let yaw: Float
+            let transform: Transform
+            /// 서버가 전달한 RoomPlan OBB 치수. 렌더 모델의 숨은 여백과 무관한 충돌 기준이다.
+            let dimensions: SIMD3<Float>
         }
         var poseBaseline: [String: PoseBaseline] = [:]
 
@@ -1418,6 +1609,26 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 ))
             }
             return edits
+        }
+
+        func resetFurnitureToBaseline() {
+            deselect()
+            for (identifier, entity) in entitiesByIdentifier {
+                if let baseline = poseBaseline[identifier] {
+                    entity.transform = baseline.transform
+                }
+                entity.isEnabled = true
+            }
+        }
+
+        func showAllFurniture() {
+            entitiesByIdentifier.values.forEach { $0.isEnabled = true }
+        }
+
+        func setHiddenFurnitureIdentifiers(_ hiddenIdentifiers: Set<String>) {
+            for (identifier, entity) in entitiesByIdentifier {
+                entity.isEnabled = !hiddenIdentifiers.contains(identifier)
+            }
         }
         /// 편집 모드에서 선택된 가구를 옮기는 오른쪽 핸들바 — 선택 여부에 따라 보이기/숨기기
         var nudgeHandle: FurnitureNudgeHandle?
@@ -1455,32 +1666,123 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
         }
 
-        private var lastScale: Float = 1.0
-        private var currentScale: Float = 1.0
         private var lastRotation: Float = 0
+        private var preEditRoomOrientation: simd_quatf?
+        private var preEditRoomScale: SIMD3<Float>?
+        private var preEditCameraTransform: Transform?
+
+        /// 편집 중에는 화면과 방 좌표가 서로 달라지지 않도록 방을 원래 축/크기로 고정하고
+        /// 카메라를 수직 위보기로 전환한다. 편집을 끝내면 사용자가 보던 시점만 복원한다.
+        func setEditMode(_ enabled: Bool) {
+            guard editMode != enabled else { return }
+
+            if enabled {
+                preEditRoomOrientation = roomAnchor?.orientation
+                preEditRoomScale = roomAnchor?.scale
+                preEditCameraTransform = camera?.transform
+                editMode = true
+                deselect()
+
+                if let roomAnchor {
+                    roomAnchor.orientation = simd_quatf()
+                    roomAnchor.scale = SIMD3(repeating: 1)
+                }
+                lastRotation = 0
+                applyTopDownCamera()
+            } else {
+                deselect()
+                editMode = false
+                if let orientation = preEditRoomOrientation {
+                    roomAnchor?.orientation = orientation
+                }
+                if let scale = preEditRoomScale {
+                    roomAnchor?.scale = scale
+                }
+                if let transform = preEditCameraTransform {
+                    camera?.transform = transform
+                    orbitCamera.syncFromCamera()
+                }
+                preEditRoomOrientation = nil
+                preEditRoomScale = nil
+                preEditCameraTransform = nil
+                panTarget = .none
+                dragPlaneY = nil
+                dragOffsetXZ = .zero
+            }
+        }
+
+        /// 편집용 고정 카메라. 완전 수직보다는 아주 살짝 기울여 가구 높이가 보이게 하고,
+        /// 방 가장자리 가구가 잘리지 않도록 일반 보기보다 충분히 높게 배치한다.
+        func applyTopDownCamera(roomSize: Float? = nil) {
+            let desiredHeight = roomSize.map { $0 * 1.65 + 2.0 } ?? (defaultCameraDistance * 1.6)
+            let height = min(max(desiredHeight, 7), 24)
+            let pitch: Float = .pi * 0.44
+            orbitCamera.setPose(yaw: 0,
+                                pitch: pitch,
+                                distance: height / max(sin(pitch), 0.01))
+        }
 
         /// 편집 모드에서 현재 선택된 가구 — 탭으로 골라두면 확대 표시되고, 그 상태에서 빈 바닥을
         /// 탭하면 그 자리로 배치된다. 연속 드래그가 아니라 "탭 한 번 = 위치 확정"이라 벽 통과가
         /// 구조적으로 발생하지 않는다 (최종 위치 딱 한 번만 clampEntityToWalls로 검사).
         private var selectedEntity: Entity?
         private var selectedOriginalScale: SIMD3<Float>?
+        private var selectionIndicator: Entity?
+        private enum PanTarget { case none, camera, furniture }
+        private var panTarget: PanTarget = .none
+        private var dragPlaneY: Float?
+        private var dragOffsetXZ = SIMD2<Float>.zero
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
-            if g.state == .began { lastScale = currentScale }
-            currentScale = max(0.3, min(6.0, lastScale * Float(g.scale)))
-            roomAnchor?.scale = SIMD3(repeating: currentScale)
+            if g.state == .began { orbitCamera.pinchBegan() }
+            orbitCamera.pinch(scale: g.scale)
+        }
+
+        /// 한 손가락은 가구 이동, 두 손가락 드래그는 카메라 시점 변경으로 분리한다.
+        @objc func handleCameraPan(_ g: UIPanGestureRecognizer) {
+            guard let arView else { return }
+            orbitCamera.pan(g.translation(in: arView))
+            g.setTranslation(.zero, in: arView)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool {
+            var view = touch.view
+            while let current = view {
+                if current is UIControl { return false }
+                if current === arView { break }
+                view = current.superview
+            }
+            return true
         }
 
         @objc func handleRotation(_ g: UIRotationGestureRecognizer) {
             if g.state == .began { lastRotation = 0 }
             let delta = Float(g.rotation) - lastRotation
             lastRotation = Float(g.rotation)
-            roomAnchor?.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+            if editMode {
+                guard let selectedEntity else { return }
+                let originalTransform = selectedEntity.transform
+                let originalCollision = furnitureCollisionScore(for: selectedEntity)
+                selectedEntity.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
+                clampEntityToWalls(selectedEntity)
+                if !isAcceptableCollisionChange(from: originalCollision,
+                                                to: furnitureCollisionScore(for: selectedEntity)) {
+                    selectedEntity.transform = originalTransform
+                }
+                updateSelectionIndicatorTransform()
+            } else {
+                orbitCamera.rotate(by: delta)
+            }
         }
 
         /// 편집 모드 전용 탭 처리:
-        /// - 가구를 탭 → 선택(확대 강조 + 오른쪽 핸들바 표시). 이미 선택된 같은 가구를 다시 탭
-        ///   → 제자리 90도 회전.
+        /// - 가구를 탭 → 선택(확대 강조 + 미세 조정 패드 표시).
         /// - 선택된 상태에서 가구가 아닌 곳을 탭 → 선택 해제(핸들바 숨김).
         @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard editMode, g.state == .ended, let arView else { return }
@@ -1488,42 +1790,79 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let hit = furnitureRoot(from: arView.entity(at: loc))
 
             if let hit {
-                if hit === selectedEntity {
-                    hit.orientation *= simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
-                } else {
-                    select(hit)
-                }
+                if hit !== selectedEntity { select(hit) }
             } else {
                 deselect()
             }
         }
 
-        /// 오른쪽 핸들바를 민 화면 delta(pt)를 카메라 기준 좌/우·앞/뒤 이동으로 변환해 선택된
-        /// 가구를 옮긴다. 3D 화면을 직접 탭/드래그하는 것보다 시점 각도에 안 흔들려서 예측 가능하다.
+        /// 오른쪽 패드는 작은 거리 조정 전용이다. 직접 드래그보다 감도를 낮춰 벽 근처에서도
+        /// 원하는 위치를 세밀하게 맞출 수 있게 한다.
         func nudgeSelectedEntity(by screenDelta: CGPoint) {
-            guard let selectedEntity, let camera else { return }
-            let m = camera.transform.matrix
-            var right   = SIMD3<Float>(m.columns.0.x, 0, m.columns.0.z)
-            var forward = SIMD3<Float>(-m.columns.2.x, 0, -m.columns.2.z)   // 카메라는 -Z 방향을 봄
-            if length(right) > 0.001   { right = normalize(right) }
-            if length(forward) > 0.001 { forward = normalize(forward) }
-
-            let sensitivity: Float = 0.012
+            guard let selectedEntity else { return }
+            let sensitivity: Float = 0.0035
             let dx = Float(screenDelta.x) * sensitivity
-            let dz = Float(screenDelta.y) * sensitivity   // 화면 아래로 밀면 카메라 쪽(뒤)으로
+            let dz = Float(screenDelta.y) * sensitivity
 
-            let worldDelta = right * dx - forward * dz
+            // 편집 화면은 항상 위보기로 고정되므로 화면 오른쪽=+X, 화면 아래=+Z가 된다.
+            // 카메라 기울기를 다시 계산하지 않아 조이스틱 방향도 항상 일정하다.
+            let worldDelta = SIMD3<Float>(dx, 0, dz)
             let current = selectedEntity.position(relativeTo: nil)
-            selectedEntity.setPosition(current + worldDelta, relativeTo: nil)
+            _ = moveWithFurnitureCollisions(selectedEntity, to: current + worldDelta)
+        }
+
+        /// 화면 좌표에서 카메라 ray를 쏴 가구 높이의 수평 평면과 만나는 지점을 구한다.
+        /// 화면 이동량을 임의 비율로 환산하지 않기 때문에, 가구가 손가락을 그대로 따라온다.
+        private func pointOnDragPlane(at screenPoint: CGPoint, y: Float) -> SIMD3<Float>? {
+            guard let ray = arView?.ray(through: screenPoint), abs(ray.direction.y) > 0.0001 else { return nil }
+            let distance = (y - ray.origin.y) / ray.direction.y
+            guard distance > 0 else { return nil }
+            return ray.origin + ray.direction * distance
+        }
+
+        private func beginFurnitureDrag(_ entity: Entity, at screenPoint: CGPoint) {
+            let worldPosition = entity.position(relativeTo: nil)
+            let bounds = entity.visualBounds(relativeTo: nil)
+            let planeY = (bounds.min.y + bounds.max.y) / 2
+            dragPlaneY = planeY
+            if let point = pointOnDragPlane(at: screenPoint, y: planeY) {
+                dragOffsetXZ = SIMD2(worldPosition.x - point.x, worldPosition.z - point.z)
+            } else {
+                dragOffsetXZ = .zero
+            }
+        }
+
+        private func dragSelectedEntity(to screenPoint: CGPoint) -> Bool {
+            guard let selectedEntity,
+                  let dragPlaneY,
+                  let point = pointOnDragPlane(at: screenPoint, y: dragPlaneY) else { return false }
+            var target = selectedEntity.position(relativeTo: nil)
+            target.x = point.x + dragOffsetXZ.x
+            target.z = point.z + dragOffsetXZ.y
+            return moveWithFurnitureCollisions(selectedEntity, to: target)
+        }
+
+        func rotateSelectedEntity(by angle: Float) {
+            guard let selectedEntity else { return }
+            let originalTransform = selectedEntity.transform
+            let originalCollision = furnitureCollisionScore(for: selectedEntity)
+            selectedEntity.orientation *= simd_quatf(angle: angle, axis: [0, 1, 0])
             clampEntityToWalls(selectedEntity)
+            if !isAcceptableCollisionChange(from: originalCollision,
+                                            to: furnitureCollisionScore(for: selectedEntity)) {
+                selectedEntity.transform = originalTransform
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            }
+            updateSelectionIndicatorTransform()
         }
 
         private func select(_ entity: Entity) {
             deselect()
             selectedEntity = entity
             selectedOriginalScale = entity.scale
-            entity.scale *= 1.08   // 선택 표시 — 살짝 확대
+            showSelectionIndicator(for: entity)
             nudgeHandle?.isHidden = false
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
 
         /// 편집 모드를 나가거나 다른 가구를 선택/해제할 때 이전 선택 표시를 원래대로 되돌린다.
@@ -1533,16 +1872,49 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
             selectedEntity = nil
             selectedOriginalScale = nil
+            selectionIndicator?.removeFromParent()
+            selectionIndicator = nil
+            dragPlaneY = nil
+            dragOffsetXZ = .zero
+            nudgeHandle?.cancelActivePress()
             nudgeHandle?.isHidden = true
         }
 
-        /// 손가락 개수와 무관하게 pan은 항상 카메라 궤도 회전 — 가구 조작이 더 이상 연속
-        /// 드래그가 아니라서(탭 한 번으로 배치) 더는 경쟁할 대상이 없다.
+        /// 편집 모드에서는 가구 위에서 시작한 드래그만 가구 이동으로 사용한다. 빈 공간 드래그는
+        /// 무시해서 방과 카메라가 움직이지 않으며, 일반 보기일 때만 기존 방 회전을 허용한다.
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
-            let delta = Float(g.translation(in: arView).x) * 0.005
-            roomAnchor?.orientation *= simd_quatf(angle: delta, axis: [0, 1, 0])
+            if g.state == .began {
+                if editMode,
+                   let hit = furnitureRoot(from: arView.entity(at: g.location(in: arView))) {
+                    if hit !== selectedEntity { select(hit) }
+                    panTarget = .furniture
+                    beginFurnitureDrag(hit, at: g.location(in: arView))
+                } else if editMode {
+                    panTarget = .none
+                } else {
+                    panTarget = .camera
+                }
+            }
+
+            let translation = g.translation(in: arView)
+            switch panTarget {
+            case .furniture:
+                if !dragSelectedEntity(to: g.location(in: arView)) {
+                    nudgeSelectedEntity(by: translation)
+                }
+            case .camera:
+                orbitCamera.pan(translation)
+            case .none:
+                break
+            }
             g.setTranslation(.zero, in: arView)
+
+            if g.state == .ended || g.state == .cancelled || g.state == .failed {
+                panTarget = .none
+                dragPlaneY = nil
+                dragOffsetXZ = .zero
+            }
         }
 
         /// 히트테스트로 잡힌 엔티티가 카탈로그 모델의 자식 메쉬일 수 있으므로,
@@ -1564,9 +1936,227 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             clampToFloorRectangle(entity)   // 벽 구간 틈 등으로 못 잡은 경우의 2차 안전망
         }
 
+        // MARK: 가구 간 충돌
+
+        /// 목적 위치가 막혀 있으면 X축과 Z축을 따로 시도한다. 게임의 캐릭터 충돌처럼 가구가
+        /// 다른 가구를 뚫지는 않되 모서리를 따라 자연스럽게 미끄러질 수 있다.
+        private func moveWithFurnitureCollisions(_ entity: Entity,
+                                                 to worldTarget: SIMD3<Float>) -> Bool {
+            defer { updateSelectionIndicatorTransform() }
+            let originalTransform = entity.transform
+            let originalWorldPosition = entity.position(relativeTo: nil)
+            let originalCollision = furnitureCollisionScore(for: entity)
+
+            if attemptPlacement(entity, from: originalTransform, at: worldTarget,
+                                originalCollision: originalCollision) {
+                return true
+            }
+
+            var xOnly = originalWorldPosition
+            xOnly.x = worldTarget.x
+            if attemptPlacement(entity, from: originalTransform, at: xOnly,
+                                originalCollision: originalCollision) {
+                return true
+            }
+
+            var zOnly = originalWorldPosition
+            zOnly.z = worldTarget.z
+            if attemptPlacement(entity, from: originalTransform, at: zOnly,
+                                originalCollision: originalCollision) {
+                return true
+            }
+
+            entity.transform = originalTransform
+            return false
+        }
+
+        /// 선택 표시를 가구 자식이 아닌 방 앵커의 별도 레이어로 추가한다. 따라서 표시 크기는
+        /// 가구 충돌·벽 판정·저장 좌표에 포함되지 않는다.
+        private func showSelectionIndicator(for entity: Entity) {
+            guard let roomAnchor else { return }
+            selectionIndicator?.removeFromParent()
+
+            let bounds = entity.visualBounds(relativeTo: entity)
+            let padding: Float = 0.06
+            let width = max(bounds.max.x - bounds.min.x + padding * 2, 0.12)
+            let depth = max(bounds.max.z - bounds.min.z + padding * 2, 0.12)
+            let centerX = (bounds.min.x + bounds.max.x) / 2
+            let centerZ = (bounds.min.z + bounds.max.z) / 2
+            let floorY = bounds.min.y + 0.018
+            let lineThickness: Float = 0.025
+
+            var borderMaterial = SimpleMaterial()
+            borderMaterial.color = .init(tint: UIColor.systemBlue.withAlphaComponent(0.95))
+            borderMaterial.roughness = 1
+            var fillMaterial = SimpleMaterial()
+            fillMaterial.color = .init(tint: UIColor.systemBlue.withAlphaComponent(0.16))
+            fillMaterial.roughness = 1
+
+            let root = Entity()
+            root.name = "selection_indicator"
+
+            let fill = ModelEntity(
+                mesh: .generateBox(width: width, height: 0.006, depth: depth),
+                materials: [fillMaterial]
+            )
+            fill.position = SIMD3(centerX, floorY - 0.006, centerZ)
+            root.addChild(fill)
+
+            let front = ModelEntity(
+                mesh: .generateBox(width: width, height: 0.018, depth: lineThickness),
+                materials: [borderMaterial]
+            )
+            front.position = SIMD3(centerX, floorY, centerZ + depth / 2)
+            root.addChild(front)
+
+            let back = front.clone(recursive: true)
+            back.position.z = centerZ - depth / 2
+            root.addChild(back)
+
+            let left = ModelEntity(
+                mesh: .generateBox(width: lineThickness, height: 0.018, depth: depth),
+                materials: [borderMaterial]
+            )
+            left.position = SIMD3(centerX - width / 2, floorY, centerZ)
+            root.addChild(left)
+
+            let right = left.clone(recursive: true)
+            right.position.x = centerX + width / 2
+            root.addChild(right)
+
+            root.transform = Transform(matrix: entity.transformMatrix(relativeTo: roomAnchor))
+            roomAnchor.addChild(root)
+            selectionIndicator = root
+        }
+
+        private func updateSelectionIndicatorTransform() {
+            guard let selectedEntity, let selectionIndicator, let roomAnchor else { return }
+            selectionIndicator.transform = Transform(
+                matrix: selectedEntity.transformMatrix(relativeTo: roomAnchor)
+            )
+        }
+
+        private func attemptPlacement(_ entity: Entity,
+                                      from originalTransform: Transform,
+                                      at worldTarget: SIMD3<Float>,
+                                      originalCollision: Float) -> Bool {
+            entity.transform = originalTransform
+            entity.setPosition(worldTarget, relativeTo: nil)
+            clampEntityToWalls(entity)
+            let newCollision = furnitureCollisionScore(for: entity)
+            if isAcceptableCollisionChange(from: originalCollision, to: newCollision) {
+                return true
+            }
+            entity.transform = originalTransform
+            return false
+        }
+
+        /// 원래 겹치지 않았으면 새 겹침을 금지하고, 서버 결과가 이미 겹쳐 있었다면 겹침이
+        /// 줄어드는 방향만 허용해 사용자가 가구를 밖으로 빼낼 수 있게 한다.
+        private func isAcceptableCollisionChange(from oldScore: Float, to newScore: Float) -> Bool {
+            let epsilon: Float = 0.0001
+            if oldScore <= epsilon { return newScore <= epsilon }
+            return newScore < oldScore - epsilon
+        }
+
+        private func furnitureCollisionScore(for entity: Entity) -> Float {
+            guard let roomAnchor, entity.isEnabled else { return 0 }
+            let collision = collisionFootprintData(for: entity, relativeTo: roomAnchor)
+            var score: Float = 0
+
+            for other in entitiesByIdentifier.values where other !== entity && other.isEnabled {
+                let otherCollision = collisionFootprintData(for: other, relativeTo: roomAnchor)
+                let verticalGap: Float = 0.01
+                guard collision.maxY > otherCollision.minY + verticalGap,
+                      otherCollision.maxY > collision.minY + verticalGap else { continue }
+                if let penetration = footprintPenetration(collision.corners, otherCollision.corners) {
+                    score += penetration
+                }
+            }
+            return score
+        }
+
+        private struct CollisionFootprintData {
+            let corners: [SIMD2<Float>]
+            let minY: Float
+            let maxY: Float
+        }
+
+        /// 서버의 RoomPlan OBB 치수로 충돌용 발자국을 만든다. 화면 모델의 장식·숨은 여백은
+        /// 사용하지 않으며, 벽에 육안상 바로 붙일 수 있도록 각 면에 1cm 접촉 여유를 둔다.
+        private func collisionFootprintData(for entity: Entity,
+                                            relativeTo roomAnchor: Entity) -> CollisionFootprintData {
+            if let identifier = identifierByEntity[ObjectIdentifier(entity)],
+               let baseline = poseBaseline[identifier] {
+                let orientation = entity.orientation
+                let entityPosition = entity.position(relativeTo: roomAnchor)
+                let center = entityPosition + orientation.act(baseline.centerOffset)
+                let rawAxisX = orientation.act(SIMD3<Float>(1, 0, 0))
+                let rawAxisZ = orientation.act(SIMD3<Float>(0, 0, 1))
+                let x2 = SIMD2(rawAxisX.x, rawAxisX.z)
+                let z2 = SIMD2(rawAxisZ.x, rawAxisZ.z)
+                let axisX = length(x2) > 0.001 ? normalize(x2) : SIMD2<Float>(1, 0)
+                let axisZ = length(z2) > 0.001 ? normalize(z2) : SIMD2<Float>(0, 1)
+                let halfWidth = max(baseline.dimensions.x / 2 - 0.01, 0.01)
+                let halfDepth = max(baseline.dimensions.z / 2 - 0.01, 0.01)
+                let center2 = SIMD2(center.x, center.z)
+                return CollisionFootprintData(
+                    corners: [
+                        center2 - axisX * halfWidth - axisZ * halfDepth,
+                        center2 + axisX * halfWidth - axisZ * halfDepth,
+                        center2 + axisX * halfWidth + axisZ * halfDepth,
+                        center2 - axisX * halfWidth + axisZ * halfDepth,
+                    ],
+                    minY: center.y - baseline.dimensions.y / 2,
+                    maxY: center.y + baseline.dimensions.y / 2
+                )
+            }
+
+            // 레거시 데이터에 서버 치수가 없을 때만 렌더 바운드로 폴백한다.
+            let bounds = entity.visualBounds(relativeTo: roomAnchor)
+            return CollisionFootprintData(
+                corners: [
+                    SIMD2(bounds.min.x, bounds.min.z),
+                    SIMD2(bounds.max.x, bounds.min.z),
+                    SIMD2(bounds.max.x, bounds.max.z),
+                    SIMD2(bounds.min.x, bounds.max.z),
+                ],
+                minY: bounds.min.y,
+                maxY: bounds.max.y
+            )
+        }
+
+        /// Separating Axis Theorem으로 두 회전 사각형의 최소 침투량을 계산한다.
+        /// 약 1.5cm 이하는 접촉으로 간주해 딱 붙여 배치할 수 있게 한다.
+        private func footprintPenetration(_ lhs: [SIMD2<Float>],
+                                          _ rhs: [SIMD2<Float>]) -> Float? {
+            guard lhs.count == 4, rhs.count == 4 else { return nil }
+            let contactTolerance: Float = 0.015
+            var minimumPenetration = Float.greatestFiniteMagnitude
+
+            for polygon in [lhs, rhs] {
+                for index in polygon.indices {
+                    let next = polygon[(index + 1) % polygon.count]
+                    let edge = next - polygon[index]
+                    guard length(edge) > 0.0001 else { continue }
+                    let axis = normalize(SIMD2<Float>(-edge.y, edge.x))
+                    let lhsProjection = lhs.map { dot($0, axis) }
+                    let rhsProjection = rhs.map { dot($0, axis) }
+                    guard let lhsMin = lhsProjection.min(), let lhsMax = lhsProjection.max(),
+                          let rhsMin = rhsProjection.min(), let rhsMax = rhsProjection.max() else { continue }
+                    let overlap = min(lhsMax, rhsMax) - max(lhsMin, rhsMin)
+                    if overlap <= contactTolerance { return nil }
+                    minimumPenetration = min(minimumPenetration, overlap - contactTolerance)
+                }
+            }
+            return minimumPenetration.isFinite ? minimumPenetration : nil
+        }
+
         private func clampToWallBarriers(_ entity: Entity) {
-            guard !wallBarriers.isEmpty else { return }
-            let corners = worldCorners(of: entity)
+            guard !wallBarriers.isEmpty, let roomAnchor else { return }
+            // wallBarriers는 서버의 방 로컬 좌표다. 화면 중앙 정렬로 이동한 world 좌표와 섞으면
+            // 가구마다 엉뚱한 위치에서 막히므로 가구 바운드와 이동 보정도 방 로컬 좌표로 통일한다.
+            let corners = roomLocalCorners(of: entity)
 
             var totalPush = SIMD3<Float>.zero
             for wall in wallBarriers {
@@ -1583,15 +2173,15 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 }
             }
             guard totalPush != .zero else { return }
-            let currentWorld = entity.position(relativeTo: nil)
-            entity.setPosition(currentWorld + totalPush, relativeTo: nil)
+            let current = entity.position(relativeTo: roomAnchor)
+            entity.setPosition(current + totalPush, relativeTo: roomAnchor)
         }
 
         /// 바닥 전체를 감싸는 사각형 밖으로는 절대 못 나가게 하는 안전망. 벽 구간 사이 틈(모서리 등)
         /// 때문에 clampToWallBarriers가 못 잡는 극단적인 경우를 여기서 마지막으로 잡는다.
         private func clampToFloorRectangle(_ entity: Entity) {
-            guard let floorTransform, let floorHalfExtent else { return }
-            let corners = worldCorners(of: entity)
+            guard let floorTransform, let floorHalfExtent, let roomAnchor else { return }
+            let corners = roomLocalCorners(of: entity)
             let inv = floorTransform.inverse
 
             var minLocalX = Float.greatestFiniteMagnitude, maxLocalX = -Float.greatestFiniteMagnitude
@@ -1610,21 +2200,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             else if minLocalY < -floorHalfExtent.y { dy = -floorHalfExtent.y - minLocalY }
             guard dx != 0 || dy != 0 else { return }
 
-            let worldDelta4 = floorTransform * SIMD4<Float>(dx, dy, 0, 0)
-            let worldDelta = SIMD3(worldDelta4.x, worldDelta4.y, worldDelta4.z)
-            let currentWorld = entity.position(relativeTo: nil)
-            entity.setPosition(currentWorld + worldDelta, relativeTo: nil)
+            let roomDelta4 = floorTransform * SIMD4<Float>(dx, dy, 0, 0)
+            let roomDelta = SIMD3(roomDelta4.x, roomDelta4.y, roomDelta4.z)
+            let current = entity.position(relativeTo: roomAnchor)
+            entity.setPosition(current + roomDelta, relativeTo: roomAnchor)
         }
 
-        private func worldCorners(of entity: Entity) -> [SIMD3<Float>] {
-            let bounds = entity.visualBounds(relativeTo: nil)
+        private func roomLocalCorners(of entity: Entity) -> [SIMD3<Float>] {
+            guard let roomAnchor else { return [] }
+            let collision = collisionFootprintData(for: entity, relativeTo: roomAnchor)
             var corners: [SIMD3<Float>] = []
             corners.reserveCapacity(8)
-            for x in [bounds.min.x, bounds.max.x] {
-                for y in [bounds.min.y, bounds.max.y] {
-                    for z in [bounds.min.z, bounds.max.z] {
-                        corners.append(SIMD3(x, y, z))
-                    }
+            for point in collision.corners {
+                for y in [collision.minY, collision.maxY] {
+                    corners.append(SIMD3(point.x, y, point.y))
                 }
             }
             return corners

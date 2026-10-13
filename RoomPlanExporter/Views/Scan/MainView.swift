@@ -164,7 +164,7 @@ private struct SpaceRow: View {
     let onTap: () -> Void
 
     private var hasOptimized: Bool { status?.hasOptimized ?? false }
-    private var hasEdited: Bool { (status?.userEditedCount ?? 0) > 0 }
+    private var editedCount: Int { status?.userEditedCount ?? 0 }
 
     var body: some View {
         Button(action: onTap) {
@@ -200,9 +200,9 @@ private struct SpaceRow: View {
                     .padding(.leading, 4)
 
                 HStack(spacing: 3) {
-                    versionDot(filled: true)               // 원본 (항상 존재)
-                    versionDot(filled: hasOptimized)        // 최적화
-                    versionDot(filled: hasEdited)           // 사용자 편집
+                    ForEach(1...3, id: \.self) { index in
+                        versionDot(filled: editedCount >= index)
+                    }
                 }
                 .padding(.leading, 6)
             }

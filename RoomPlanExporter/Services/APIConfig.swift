@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 공용 서버 설정
 
 enum APIConfig {
-    static let baseURL = "http://3.27.213.100/api"
+    static let baseURL = "http://16.176.220.247/api"
 }
 
 // MARK: - 공용 에러 응답 ({"detail": "..."} 형태)

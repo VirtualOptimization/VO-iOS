@@ -24,6 +24,9 @@ final class AssistantViewModel: ObservableObject {
     @Published var errorText: String? = nil
     /// simulate_without이 마지막으로 가리킨 가구 — 3D 뷰에서 이 식별자를 실제로 숨긴다.
     @Published var hiddenFurnitureIdentifiers: Set<String> = []
+    /// 3D 뷰는 이 ViewModel의 형제 뷰라 @Published 변경만으로는 항상 다시 그려지지 않는다.
+    /// 식별자 변경을 RealityKit 장면에도 즉시 직접 전달한다.
+    var onHiddenFurnitureChange: ((Set<String>) -> Void)?
 
     private let service = AssistantService()
     private let dataURLString: String
@@ -34,7 +37,10 @@ final class AssistantViewModel: ObservableObject {
     당신은 V-O 앱의 'AI 배치 상담'이에요. 사용자가 LiDAR로 스캔한 실제 방 데이터를 바탕으로 \
     가구를 어디에 놓을 수 있는지, 특정 가구를 빼면 공간이 얼마나 넓어지는지 자연어로 설명해요. \
     좌표나 면적 계산은 절대 스스로 추정하지 말고, 반드시 suggest_placement / simulate_without \
-    tool을 호출해서 받은 결과만 근거로 답변해요. 정중한 한국어 존댓말로 2~3문장 이내로 짧게 답해요.
+    tool을 호출해서 받은 결과만 근거로 답변해요. 사용자가 '없애봐', '빼볼래?', '치워줘', \
+    '없는 상태로 보여줘'처럼 말하면 실제 삭제가 아니라 simulate_without을 호출해 화면에서 임시로 \
+    숨겨 보여줘요. '되돌려줘', '다시 보여줘', '취소해줘'라고 하면 restore_all_furniture를 호출해요. \
+    정중한 한국어 존댓말로 2~3문장 이내로 짧게 답해요.
     """
 
     init(dataURLString: String) {
@@ -60,7 +66,7 @@ final class AssistantViewModel: ObservableObject {
 
     /// 채팅 모드를 나갈 때 숨겨둔 가구를 다시 보이게 복원
     func showAllFurniture() {
-        hiddenFurnitureIdentifiers = []
+        applyHiddenFurniture([])
     }
 
     func send() {
@@ -70,11 +76,48 @@ final class AssistantViewModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: text))
         apiMessages.append(["role": "user", "content": [["type": "text", "text": text]]])
 
+        // 화면 변경 명령은 Claude의 tool 선택 여부에 맡기지 않는다. 사용자가 명확하게
+        // 없애기/복원을 요청하면 로컬 계산기로 즉시 처리해 3D 화면이 바로 반응하게 한다.
+        if handleImmediateFurnitureCommand(text) { return }
+
         Task {
             isLoading = true
             defer { isLoading = false }
             await runTurn()
         }
+    }
+
+    private func handleImmediateFurnitureCommand(_ text: String) -> Bool {
+        guard let room else { return false }
+        let normalized = text.replacingOccurrences(of: " ", with: "").lowercased()
+
+        let restoreWords = ["되돌", "다시보여", "복구", "원래대로"]
+        if restoreWords.contains(where: normalized.contains) {
+            applyHiddenFurniture([])
+            appendImmediateAssistantMessage("임시로 숨겼던 가구를 모두 원래대로 다시 표시했어요.")
+            return true
+        }
+
+        let removalWords = ["없애", "빼", "치워", "숨겨", "제거"]
+        guard removalWords.contains(where: normalized.contains) else { return false }
+
+        let result = RoomFitCalculator.simulateWithout(in: room, query: text)
+        applyHiddenFurniture(result.identifier.map { [$0] } ?? [])
+        appendImmediateAssistantMessage(result.summary)
+        return true
+    }
+
+    private func appendImmediateAssistantMessage(_ text: String) {
+        messages.append(ChatMessage(role: .assistant, text: text))
+        apiMessages.append([
+            "role": "assistant",
+            "content": [["type": "text", "text": text]]
+        ])
+    }
+
+    private func applyHiddenFurniture(_ identifiers: Set<String>) {
+        hiddenFurnitureIdentifiers = identifiers
+        onHiddenFurnitureChange?(identifiers)
     }
 
     /// tool_use가 나오면 로컬에서 계산해 결과를 다시 넣고, 최종 텍스트가 나올 때까지 반복.
@@ -119,8 +162,11 @@ final class AssistantViewModel: ObservableObject {
             let query = input["furniture_query"] as? String ?? ""
             let result = RoomFitCalculator.simulateWithout(in: room, query: query)
             // 3D 뷰에 실제로 반영 — 마지막으로 물어본 가구만 숨김 (누적하지 않음)
-            hiddenFurnitureIdentifiers = result.identifier.map { [$0] } ?? []
+            applyHiddenFurniture(result.identifier.map { [$0] } ?? [])
             return result.summary
+        case "restore_all_furniture":
+            applyHiddenFurniture([])
+            return "임시로 숨겼던 가구를 모두 원래대로 다시 표시했어요."
         default:
             return "지원하지 않는 요청이에요."
         }

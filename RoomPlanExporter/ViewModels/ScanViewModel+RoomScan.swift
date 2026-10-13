@@ -78,23 +78,23 @@ extension ScanViewModel {
         return try Data(contentsOf: fileURL)
     }
 
-    /// GET /rooms/{room_id}/optimized 폴링 → data_url(normalized.json) 나오면 바로 완료 (5초 간격, 최대 2시간).
-    /// 서버가 실패로 표시하면 2시간을 기다리지 않고 바로 실패 처리한다.
+    /// 파일만 먼저 생기고 OPTIMIZED 버전의 DB 커밋은 뒤늦게 끝날 수 있다. 따라서 상태가
+    /// COMPLETED이고 버전 목록에도 OPTIMIZED가 보일 때만 완료로 판단한다.
     private func pollUntilComplete(roomId: Int, accessToken: String) async throws {
         let maxAttempts = 1440
         for attempt in 1...maxAttempts {
             try await Task.sleep(for: .seconds(5))
-            if let detail = try? await optimizer.fetchVersionDetail(
-                roomId: roomId, versionType: "optimized", accessToken: accessToken),
-               detail.dataUrl != nil {
-                print("✅ 폴링 \(attempt)/\(maxAttempts) – normalized.json 확인됨, GLB 안 기다리고 진행")
-                return
-            }
-            if let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken),
-               status.optimizationStatus.uppercased() == "FAILED" {
+            let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken)
+            if status?.optimizationStatus.uppercased() == "FAILED" {
                 throw OptimizerError.optimizationFailed
             }
-            print("⏳ 폴링 \(attempt)/\(maxAttempts) – optimized 아직 없음")
+            if status?.optimizationStatus.uppercased() == "COMPLETED",
+               let versions = try? await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken),
+               versions.versions.contains(where: { $0.versionType.uppercased() == "OPTIMIZED" }) {
+                print("✅ 폴링 \(attempt)/\(maxAttempts) – OPTIMIZED 버전 저장까지 완료")
+                return
+            }
+            print("⏳ 폴링 \(attempt)/\(maxAttempts) – 최적화 저장 마무리 중")
         }
         throw OptimizerError.timeout
     }
@@ -103,6 +103,7 @@ extension ScanViewModel {
 
     /// 최적화 시작 → 완료까지 폴링 → 최적화 버전을 선택한 상태로 내 방 조회 화면 복귀
     func optimizeRoom(from detail: ScanDetail) {
+        requestOptimizationNotificationPermission()
         runOptimization(detail: detail) { roomId, accessToken in
             try await self.optimizer.startOptimization(roomId: roomId, accessToken: accessToken)
         }
@@ -137,12 +138,26 @@ extension ScanViewModel {
                     try await pollUntilComplete(roomId: roomId, accessToken: accessToken)
                 }
                 let updated = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
-                phase = .inquiryResult(updated, focusVersionType: "OPTIMIZED")
+                let isStillWaiting: Bool
+                if case .processing(let visibleRoomId) = phase {
+                    isStillWaiting = visibleRoomId == roomId
+                } else {
+                    isStillWaiting = false
+                }
+                if isStillWaiting {
+                    phase = .inquiryResult(updated, focusVersionType: "OPTIMIZED")
+                } else {
+                    postOptimizationNotification(roomId: roomId, succeeded: true)
+                }
                 syncRoomsWithServer()
             } catch {
                 print("❌ 최적화 실패: \(error)")
                 optimizeError = "최적화에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
-                phase = .inquiryResult(detail)
+                if case .processing(let visibleRoomId) = phase, visibleRoomId == roomId {
+                    phase = .inquiryResult(detail)
+                } else {
+                    postOptimizationNotification(roomId: roomId, succeeded: false)
+                }
             }
         }
     }

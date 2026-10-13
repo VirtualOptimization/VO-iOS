@@ -83,13 +83,21 @@ actor AssistantService {
         ],
         [
             "name": "simulate_without",
-            "description": "방에 있는 특정 가구를 실제로 지우지 않고, 뺐다고 가정했을 때 확보되는 바닥 면적과 방 전체 대비 비율을 계산한다.",
+            "description": "방에 있는 특정 가구를 실제로 삭제하지 않고 화면에서 임시로 숨긴다. 사용자가 '없애봐', '빼볼래', '치워줘', '없는 상태로 보여줘'라고 요청할 때도 반드시 이 tool을 사용한다. 동시에 확보되는 바닥 면적과 방 전체 대비 비율을 계산한다.",
             "input_schema": [
                 "type": "object",
                 "properties": [
                     "furniture_query": ["type": "string", "description": "제외해볼 가구를 가리키는 한국어 표현. 예: '책상', '침대', '옷장'"]
                 ],
                 "required": ["furniture_query"]
+            ]
+        ],
+        [
+            "name": "restore_all_furniture",
+            "description": "AI 상담 중 임시로 숨긴 가구를 모두 다시 표시한다. 사용자가 '되돌려줘', '다시 보여줘', '취소해줘'라고 요청할 때 사용한다.",
+            "input_schema": [
+                "type": "object",
+                "properties": [:] as [String: Any]
             ]
         ]
     ]

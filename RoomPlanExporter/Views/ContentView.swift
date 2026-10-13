@@ -92,15 +92,32 @@ private struct ScanFlowView: View {
                     .transition(.opacity)
 
             case .processing:
-                LoadingView(
-                    statusText: "최적화 중..",
-                    tips: [
-                        "최적화 진행 중입니다\n화면을 끄지 마세요",
-                        "가구 배치를 분석하고 있어요",
-                        "끝나면 버전 선택에서\n원본과 비교해볼 수 있어요",
-                        "잠시 후 최적화 결과가 나와요"
-                    ]
-                )
+                ZStack(alignment: .topLeading) {
+                    LoadingView(
+                        statusText: "최적화 중..",
+                        tips: [
+                            "다른 화면으로 이동해도\n최적화는 계속 진행돼요",
+                            "가구 배치를 분석하고 있어요",
+                            "완료되면 알림으로 알려드릴게요",
+                            "버전 선택에서 원본과 비교할 수 있어요"
+                        ]
+                    )
+
+                    Button { vm.leaveOptimizationScreen() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.left")
+                            Text("내 공간")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voBlue)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 12)
+                    .padding(.leading, 16)
+                }
                 .transition(.opacity)
 
             case .inquiryLoading:
@@ -118,6 +135,23 @@ private struct ScanFlowView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: vm.phase)
+        .alert(item: $vm.optimizationNotice) { notice in
+            if notice.succeeded {
+                return Alert(
+                    title: Text("최적화가 완료됐어요"),
+                    message: Text("\(notice.roomName)의 새로운 배치를 확인해보세요."),
+                    primaryButton: .default(Text("결과 보기")) {
+                        vm.openOptimizedRoom(roomId: notice.roomId)
+                    },
+                    secondaryButton: .cancel(Text("나중에"))
+                )
+            }
+            return Alert(
+                title: Text("최적화를 완료하지 못했어요"),
+                message: Text("\(notice.roomName)에서 다시 시도해주세요."),
+                dismissButton: .default(Text("확인"))
+            )
+        }
     }
 }
 

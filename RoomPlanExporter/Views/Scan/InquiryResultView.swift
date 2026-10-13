@@ -72,6 +72,10 @@ struct InquiryResultView: View {
         selectedVersion?.versionType.uppercased() == "OPTIMIZED"
     }
 
+    private var isOptimizationRunning: Bool {
+        vm.optimizingRoomIds.contains(detail.roomId)
+    }
+
     private var currentRoomName: String {
         vm.savedSpaces.first { $0.roomId == detail.roomId }?.name ?? "내 공간"
     }
@@ -157,8 +161,9 @@ struct InquiryResultView: View {
                     VStack(alignment: .trailing, spacing: 8) {
                         if showActionHints {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("가구를 탭해서 선택 → 오른쪽 핸들을 드래그해서 이동")
-                                Text("다시 탭하면 90도 회전")
+                                Text("가구를 탭한 뒤 손가락으로 끌어서 이동하세요")
+                                Text("두 손가락 드래그와 확대·축소로 시점을 조절하세요")
+                                Text("아래 버튼은 선택한 가구를 90도 회전해요")
                                 Text("다 옮겼으면 오른쪽 위 저장을 눌러주세요")
                             }
                             .font(.regular11)
@@ -204,8 +209,8 @@ struct InquiryResultView: View {
 
                 // 3D 뷰를 가리지 않도록 주요 기능만 아래에 가로로 둔다.
                 HStack(spacing: 8) {
-                    toolbarButton("최적화", icon: "sparkles",
-                                  isEnabled: !isViewingOptimized) { optimize() }
+                    toolbarButton(isOptimizationRunning ? "최적화 중" : "최적화", icon: "sparkles",
+                                  isEnabled: !isViewingOptimized && !isOptimizationRunning) { optimize() }
                     toolbarButton("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right",
                                   isEnabled: currentDataURL != nil) { mode = .edit }
                     toolbarButton("AI 상담", icon: "bubble.left.and.bubble.right.fill",
@@ -497,7 +502,11 @@ struct InquiryResultView: View {
 
     private func enterAssistantMode() {
         guard let currentDataURL else { return }
-        assistantVM = AssistantViewModel(dataURLString: currentDataURL)
+        let viewModel = AssistantViewModel(dataURLString: currentDataURL)
+        viewModel.onHiddenFurnitureChange = { identifiers in
+            editSession.setHiddenFurnitureIdentifiers(identifiers)
+        }
+        assistantVM = viewModel
         withAnimation(.easeInOut(duration: 0.2)) { mode = .assistant }
     }
 
@@ -536,7 +545,15 @@ struct InquiryResultView: View {
 
     /// 채팅/가구 편집 모드 둘 다 이 버튼 하나로 나간다.
     private func exitSpecialMode() {
-        assistantVM?.showAllFurniture()
+        let exitingMode = mode
+        if exitingMode == .assistant {
+            assistantVM?.showAllFurniture()
+            // SwiftUI 상태가 사라지기 전에 RealityKit 엔티티도 직접 모두 복원한다.
+            editSession.restoreFurnitureVisibility()
+        } else if exitingMode == .edit {
+            // 저장하지 않고 취소했다면 화면에서 옮긴 위치도 편집 시작 시점으로 되돌린다.
+            editSession.cancelPendingEdits()
+        }
         withAnimation(.easeInOut(duration: 0.2)) { mode = .normal }
         assistantVM = nil
         showActionHints = false

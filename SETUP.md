@@ -38,7 +38,7 @@ Xcode에서 `RoomPlanCatalogGenerator.xcodeproj`를 열고
 하드코딩되어 있습니다.
 
 ```swift
-static let baseURL = "http://3.27.213.100/api"
+static let baseURL = "http://16.176.220.247/api"
 ```
 
 EC2 인스턴스를 다시 띄우면 IP가 바뀌므로 **이 한 줄만** 고치면 됩니다.

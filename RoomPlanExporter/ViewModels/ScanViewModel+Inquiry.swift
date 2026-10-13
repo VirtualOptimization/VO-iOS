@@ -20,13 +20,39 @@ extension ScanViewModel {
                 let hasOptimized = detail.versions.contains { $0.versionType.uppercased() == "OPTIMIZED" }
                 let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken)
                 if !hasOptimized, status?.optimizationStatus.uppercased() == "PROCESSING" {
-                    waitForRunningOptimization(detail: detail)
+                    if isOptimizing || optimizingRoomIds.contains(roomId) {
+                        // 이 앱에서 이미 기다리는 Task가 있다면 중복 폴링하지 않고 원본 방을 보여준다.
+                        // 완료 시 전역 알림이 도착한다.
+                        phase = .inquiryResult(detail)
+                    } else {
+                        waitForRunningOptimization(detail: detail)
+                    }
                 } else {
                     phase = .inquiryResult(detail)
                 }
             } catch {
                 print("❌ 조회 실패: \(error)")
                 inquiryError = "공간 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요"
+                phase = .main
+            }
+        }
+    }
+
+    func openOptimizedRoom(roomId: Int) {
+        optimizationNotice = nil
+        inquiryError = nil
+        phase = .inquiryLoading(roomId: roomId)
+        Task {
+            guard let accessToken = KeychainTokenStore.get(.accessToken) else {
+                inquiryError = "로그인이 필요해요"
+                phase = .main
+                return
+            }
+            do {
+                let detail = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
+                phase = .inquiryResult(detail, focusVersionType: "OPTIMIZED")
+            } catch {
+                inquiryError = "최적화 결과를 불러오지 못했어요. 잠시 후 다시 시도해주세요."
                 phase = .main
             }
         }
@@ -126,7 +152,19 @@ extension ScanViewModel {
                 try await optimizer.deleteVersion(roomId: roomId, versionId: versionId, accessToken: accessToken)
                 var updated = detail
                 updated.versions = detail.versions.filter { $0.versionId != versionId }
+                if let current = roomStatus[roomId] {
+                    roomStatus[roomId] = MyRoomSummary(
+                        roomId: current.roomId,
+                        name: current.name,
+                        createdAt: current.createdAt,
+                        hasOriginal: current.hasOriginal,
+                        hasOptimized: current.hasOptimized,
+                        userEditedCount: max(0, current.userEditedCount - 1)
+                    )
+                }
                 phase = .inquiryResult(updated)
+                // 메인 화면의 사용자 편집 표시가 삭제 전 개수로 남지 않게 즉시 다시 동기화한다.
+                syncRoomsWithServer()
             } catch {
                 print("❌ 삭제 실패: \(error)")
                 inquiryError = "삭제에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
