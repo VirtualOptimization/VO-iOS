@@ -3,6 +3,7 @@ import SwiftUI
 struct MainView: View {
     @ObservedObject var vm: ScanViewModel
     @ObservedObject var authVM: AuthViewModel
+    @State private var showChallenge = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,6 +14,15 @@ struct MainView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 24)
 
+                    Button { showChallenge = true } label: {
+                        Label("가구 배치 챌린지 · 랭킹 도전", systemImage: "trophy.fill")
+                            .font(.semiBold16)
+                            .frame(maxWidth: .infinity).padding(18)
+                            .foregroundStyle(Color.voBlue)
+                            .voGlassCardFillingParent(cornerRadius: 16)
+                    }
+                    .buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 12)
+
                     mySpaceSection
                         .padding(.top, 32)
                 }
@@ -20,6 +30,16 @@ struct MainView: View {
             }
         }
         .onAppear { vm.syncRoomsWithServer() }
+        .fullScreenCover(isPresented: $showChallenge) {
+            NavigationStack {
+                ChallengeRootView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("닫기") { showChallenge = false }
+                        }
+                    }
+            }
+        }
         .alert("불러오기 실패", isPresented: .constant(vm.inquiryError != nil), actions: {
             Button("확인") { vm.inquiryError = nil }
         }, message: {

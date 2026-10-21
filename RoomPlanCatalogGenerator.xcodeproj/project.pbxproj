@@ -7,10 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CC1000000000000000000001 /* RoomViewerView.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
+		CC1000000000000000000002 /* RoomOptimizerService.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
+		CC1000000000000000000003 /* APIConfig.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB41000000000000AB410001 /* APIConfig.swift */; };
+		CC1000000000000000000004 /* LiDARFurnitureScanView.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB75000000000000AB750001 /* LiDARFurnitureScanView.swift */; };
+		CC1000000000000000000005 /* RoomPlanCatalog.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = C48B87B329EE07A600D29743 /* RoomPlanCatalog.swift */; };
+		CC1000000000000000000006 /* VOButtonStyles.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB07000000000000AB070001 /* VOButtonStyles.swift */; };
+		CC1000000000000000000007 /* KeychainTokenStore.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB42000000000000AB420001 /* KeychainTokenStore.swift */; };
+		CC1000000000000000000008 /* RoomPlanCatalog.bundle in Challenge Resources */ = {isa = PBXBuildFile; fileRef = C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */; };
 		AB70000000000000AB700000 /* AssistantService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB70000000000000AB700001 /* AssistantService.swift */; };
 		AB71000000000000AB710000 /* RoomFitCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB71000000000000AB710001 /* RoomFitCalculator.swift */; };
 		AB72000000000000AB720000 /* AssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB72000000000000AB720001 /* AssistantViewModel.swift */; };
 		AB73000000000000AB730000 /* AssistantPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB73000000000000AB730001 /* AssistantPanelView.swift */; };
+		AB75000000000000AB750000 /* LiDARFurnitureScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB75000000000000AB750001 /* LiDARFurnitureScanView.swift */; };
 		070B96A62F8644FA00C0E62A /* RoomCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */; };
 		070B96A82F86451700C0E62A /* RoomViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
 		070B96AA2F8646D900C0E62A /* RoomOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
@@ -67,6 +76,7 @@
 		AB71000000000000AB710001 /* RoomFitCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomFitCalculator.swift; sourceTree = "<group>"; };
 		AB72000000000000AB720001 /* AssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViewModel.swift; sourceTree = "<group>"; };
 		AB73000000000000AB730001 /* AssistantPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPanelView.swift; sourceTree = "<group>"; };
+		AB75000000000000AB750001 /* LiDARFurnitureScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiDARFurnitureScanView.swift; sourceTree = "<group>"; };
 		070B96A52F8644FA00C0E62A /* RoomCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCaptureViewController.swift; sourceTree = "<group>"; };
 		070B96A72F86451700C0E62A /* RoomViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomViewerView.swift; sourceTree = "<group>"; };
 		070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomOptimizerService.swift; sourceTree = "<group>"; };
@@ -90,6 +100,7 @@
 		AB35000000000000AB350001 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		AB36000000000000AB360001 /* SavedSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSpace.swift; sourceTree = "<group>"; };
 		C427F92129F3703800930252 /* RoomPlanExporter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomPlanExporter.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC1000000000000000000009 /* VOChallenge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VOChallenge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C427F92329F3703800930252 /* RoomPlanExporterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanExporterApp.swift; sourceTree = "<group>"; };
 		C427F92529F3703800930252 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C427F92A29F3703800930252 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
@@ -111,11 +122,26 @@
 		AB49000000000000AB490001 /* ScanViewModel+RoomExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanViewModel+RoomExport.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+        CC2000000000000000000001 /* Challenge main app exclusions */ = {
+            isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+            membershipExceptions = (VOChallengeApp.swift);
+            target = C427F92029F3703800930252 /* RoomPlanExporter */;
+        };
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0707F8022FD98F3E000A5749 /* Resources */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Resources; sourceTree = "<group>"; };
+		CC100000000000000000000A /* Challenge */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (CC2000000000000000000001); explicitFileTypes = {}; explicitFolders = (); path = Challenge; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		CC100000000000000000000D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C427F91E29F3703800930252 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -203,6 +229,7 @@
 		AB52000000000000AB520000 /* Furniture */ = {
 			isa = PBXGroup;
 			children = (
+				AB75000000000000AB750001 /* LiDARFurnitureScanView.swift */,
 			);
 			path = Furniture;
 			sourceTree = "<group>";
@@ -271,6 +298,7 @@
 			isa = PBXGroup;
 			children = (
 				0707F8022FD98F3E000A5749 /* Resources */,
+				CC100000000000000000000A /* Challenge */,
 				070B96AB2F86475100C0E62A /* Info.plist */,
 				C499B2B029F375A000E99C6C /* RoomPlanCatalog.bundle */,
 				C427F92329F3703800930252 /* RoomPlanExporterApp.swift */,
@@ -311,6 +339,7 @@
 			children = (
 				C48B87A929EE075100D29743 /* RoomPlanCatalogGenerator */,
 				C427F92129F3703800930252 /* RoomPlanExporter.app */,
+				CC1000000000000000000009 /* VOChallenge.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -336,6 +365,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		CC100000000000000000000B /* VOChallenge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CC100000000000000000000F /* Build configuration list for PBXNativeTarget "VOChallenge" */;
+			buildPhases = (
+				CC100000000000000000000C /* Sources */,
+				CC100000000000000000000D /* Frameworks */,
+				CC100000000000000000000E /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (
+				0707F8022FD98F3E000A5749 /* Resources */,
+				CC100000000000000000000A /* Challenge */,
+			);
+			name = VOChallenge;
+			productName = VOChallenge;
+			productReference = CC1000000000000000000009 /* VOChallenge.app */;
+			productType = "com.apple.product-type.application";
+		};
 		C427F92029F3703800930252 /* RoomPlanExporter */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C427F92E29F3703800930252 /* Build configuration list for PBXNativeTarget "RoomPlanExporter" */;
@@ -350,6 +398,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				0707F8022FD98F3E000A5749 /* Resources */,
+                CC100000000000000000000A /* Challenge */,
 			);
 			name = RoomPlanExporter;
 			productName = RoomPlanExporter;
@@ -387,6 +436,7 @@
 				LastUpgradeCheck = 1620;
 				ORGANIZATIONNAME = Apple;
 				TargetAttributes = {
+					CC100000000000000000000B = { CreatedOnToolsVersion = 16.0; };
 					C427F92029F3703800930252 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -414,11 +464,18 @@
 			targets = (
 				C48B87A829EE075100D29743 /* RoomPlanCatalogGenerator */,
 				C427F92029F3703800930252 /* RoomPlanExporter */,
+				CC100000000000000000000B /* VOChallenge */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		CC100000000000000000000E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (CC1000000000000000000008 /* RoomPlanCatalog.bundle in Challenge Resources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C427F91F29F3703800930252 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -431,6 +488,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		CC100000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC1000000000000000000001 /* RoomViewerView.swift in Challenge Sources */,
+				CC1000000000000000000002 /* RoomOptimizerService.swift in Challenge Sources */,
+				CC1000000000000000000003 /* APIConfig.swift in Challenge Sources */,
+				CC1000000000000000000004 /* LiDARFurnitureScanView.swift in Challenge Sources */,
+				CC1000000000000000000005 /* RoomPlanCatalog.swift in Challenge Sources */,
+				CC1000000000000000000006 /* VOButtonStyles.swift in Challenge Sources */,
+				CC1000000000000000000007 /* KeychainTokenStore.swift in Challenge Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C427F91D29F3703800930252 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -454,6 +525,7 @@
 				AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */,
 				AB11000000000000AB110000 /* InquiryView.swift in Sources */,
 				AB12000000000000AB120000 /* InquiryResultView.swift in Sources */,
+				AB75000000000000AB750000 /* LiDARFurnitureScanView.swift in Sources */,
 				AB32000000000000AB320000 /* SplashView.swift in Sources */,
 				AB33000000000000AB330000 /* LoginView.swift in Sources */,
 				AB34000000000000AB340000 /* SignUpView.swift in Sources */,
@@ -485,6 +557,48 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		CC1000000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 87QYF25CFF;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoomPlanExporter/ChallengeInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.virtualoptimization.vochallenge";
+				PRODUCT_NAME = VOChallenge;
+				WRAPPER_NAME = "$(PRODUCT_NAME).app";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+		};
+			name = Debug;
+		};
+		CC1000000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 87QYF25CFF;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoomPlanExporter/ChallengeInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.virtualoptimization.vochallenge";
+				PRODUCT_NAME = VOChallenge;
+				WRAPPER_NAME = "$(PRODUCT_NAME).app";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+		};
+			name = Release;
+		};
 		C427F92C29F3703800930252 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AB40000000000000AB400001 /* Secrets.xcconfig */;
@@ -741,6 +855,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		CC100000000000000000000F /* Build configuration list for PBXNativeTarget "VOChallenge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CC1000000000000000000010 /* Debug */,
+				CC1000000000000000000011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C427F92E29F3703800930252 /* Build configuration list for PBXNativeTarget "RoomPlanExporter" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

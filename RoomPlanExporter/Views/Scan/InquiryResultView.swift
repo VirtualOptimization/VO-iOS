@@ -50,6 +50,7 @@ struct InquiryResultView: View {
     @State private var showRoomNamePrompt = false
     @State private var roomNameDraft = ""
     @State private var showRoomDeleteAlert = false
+    @State private var showFurnitureScanner = false
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
@@ -211,6 +212,8 @@ struct InquiryResultView: View {
                 HStack(spacing: 8) {
                     toolbarButton(isOptimizationRunning ? "최적화 중" : "최적화", icon: "sparkles",
                                   isEnabled: !isViewingOptimized && !isOptimizationRunning) { optimize() }
+                    toolbarButton("가구 추가", icon: "plus.viewfinder",
+                                  isEnabled: isViewerLoaded) { showFurnitureScanner = true }
                     toolbarButton("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right",
                                   isEnabled: currentDataURL != nil) { mode = .edit }
                     toolbarButton("AI 상담", icon: "bubble.left.and.bubble.right.fill",
@@ -308,6 +311,15 @@ struct InquiryResultView: View {
         .overlay {
             if showRoomDeleteAlert {
                 roomDeleteConfirmation
+            }
+        }
+        .fullScreenCover(isPresented: $showFurnitureScanner) {
+            LiDARFurnitureScanView { draft in
+                guard editSession.addMeasuredFurniture(draft) else {
+                    vm.editError = "측정한 가구를 방에 추가하지 못했어요. 방을 다시 불러온 뒤 시도해주세요."
+                    return
+                }
+                withAnimation(.easeInOut(duration: 0.2)) { mode = .edit }
             }
         }
     }
