@@ -73,6 +73,7 @@ struct ChallengeRootView: View {
     }
 
     private var welcome: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("V-O").font(.system(size: 22, weight: .black, design: .rounded))
@@ -154,6 +155,7 @@ struct ChallengeRootView: View {
                 .padding(.top, 10)
         }
         .padding(24)
+        }
     }
 
     private func welcomeStep(_ number: String, _ title: String) -> some View {
@@ -170,6 +172,7 @@ struct ChallengeRootView: View {
     }
 
     private var entry: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 22) {
             Button("〈 돌아가기") { vm.screen = .welcome }
                 .font(.body.weight(.semibold))
@@ -197,6 +200,7 @@ struct ChallengeRootView: View {
                 .opacity(validEntry && !vm.isWorking ? 1 : 0.5)
         }
         .padding(24)
+        }
     }
 
     private var criteria: some View {
