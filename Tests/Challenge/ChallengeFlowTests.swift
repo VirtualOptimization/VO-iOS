@@ -88,20 +88,27 @@ final class MockChallengeAPI: ChallengeServing {
         precondition(abs(object.transform[0][2] - 1) < 0.0001 && object.transform[3] == [1,2,3,1])
         let validation = APIError.from(statusCode: 422, data: Data(#"{"detail":[{"msg":"Value error, 잘못된 좌표"}]}"#.utf8))
         precondition(validation.localizedDescription == "잘못된 좌표")
-        let measurement = "침대 옆 공간이 0cm예요 (권장 65cm)"
-        let advice = "침대 머리를 벽에 붙여보세요"
-        let actionWithMeasurement = "침대 옆 공간이 0cm예요. 침대를 옮겨 통로를 확보해주세요"
-        func score(hints: [String], disqualified: Bool = false) -> ChallengeScore {
+        func score(breakdown: [String: Double]? = nil, disqualified: Bool = false,
+                   beatAI: Bool = false) -> ChallengeScore {
             ChallengeScore(attemptId: 1, totalScore: 50, maxScore: 100, disqualified: disqualified,
-                           breakdown: nil, hints: hints, beatAI: false, aiScore: 80, rank: nil,
-                           totalRanked: 1, remainingAttempts: 1)
+                           breakdown: breakdown, hints: ["침대 옆 공간이 0cm예요"], beatAI: beatAI,
+                           aiScore: 80, rank: nil, totalRanked: 1, remainingAttempts: 1)
         }
-        precondition(score(hints: [measurement, "책상 앞 공간이 20cm예요 (권장 60cm)", advice,
-                                   actionWithMeasurement]).displayHints == [advice, actionWithMeasurement])
-        precondition(score(hints: ["침대 옆 공간이 0cm 에요"]).displayHints.isEmpty)
-        precondition(score(hints: [measurement], disqualified: true).displayHints == [measurement])
-        precondition(score(hints: []).displayHints.isEmpty)
-        print("PASS: actionable hints and disqualification reasons preserved; measurement-only hints hidden")
+        let excellent = score(breakdown: ["safety": 30, "principles": 30, "space": 40])
+        precondition(excellent.strengths.count == 3 && excellent.improvements.isEmpty)
+        let weak = score(breakdown: ["safety": 10, "door_clearance": 5, "furniture_use": 5,
+                                     "principles": 10, "space": 20])
+        precondition(weak.strengths.isEmpty && weak.improvements.count == 4)
+        let boundary = score(breakdown: ["safety": 24, "principles": 24, "space": 32])
+        precondition(boundary.strengths.count == 3 && boundary.improvements.count == 3)
+        precondition(score().strengths.isEmpty && score().improvements.isEmpty, "no fabricated feedback without scores")
+        let dq = score(breakdown: ["safety": 30], disqualified: true, beatAI: true)
+        precondition(dq.strengths.isEmpty && dq.improvements.isEmpty && !dq.hints.isEmpty)
+        precondition(score(beatAI: true).strengths == ["AI 배치보다 넓은 사용 가능 공간을 확보했어요."])
+        let guidance = ChallengePlacementHint.sections.flatMap(\.items)
+        precondition(guidance.count == 10 && guidance.contains { $0.contains("침대 머리") }
+                     && guidance.contains { $0.contains("문 앞") } && !guidance.contains { $0.contains("0cm예요") })
+        print("PASS: placement guide available before scoring; result feedback grounded in breakdown; disqualification reasons preserved")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }
 }

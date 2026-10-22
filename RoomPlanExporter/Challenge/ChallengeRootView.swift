@@ -11,6 +11,7 @@ struct ChallengeRootView: View {
     @State private var confirmSubmit = false
     @State private var confirmExit = false
     @State private var confirmNewParticipant = false
+    @State private var showPlacementHints = false
     @FocusState private var focusedField: EntryField?
 
     private enum EntryField: Hashable { case name, phone }
@@ -82,6 +83,11 @@ struct ChallengeRootView: View {
             }
         }
         .task { await vm.loadEvent() }
+        .sheet(isPresented: $showPlacementHints) {
+            placementHints
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .alert("알림", isPresented: Binding(get: { vm.errorMessage != nil },
                                           set: { if !$0 { vm.errorMessage = nil } })) {
             if vm.screen == .welcome && vm.event == nil {
@@ -112,7 +118,7 @@ struct ChallengeRootView: View {
             Text(screenTitle)
                 .font(.semiBold14)
                 .foregroundStyle(.white)
-                .padding(.horizontal, 68)
+                .padding(.horizontal, isPlaying ? 108 : 68)
                 .frame(maxWidth: .infinity)
             HStack {
                 if vm.screen == .welcome || vm.screen == .loading {
@@ -131,10 +137,19 @@ struct ChallengeRootView: View {
                 }
                 Spacer()
                 if isPlaying {
-                    Text("\(vm.seconds / 60):\(String(format: "%02d", vm.seconds % 60))")
-                        .font(.semiBold13).monospacedDigit()
-                        .frame(minWidth: 48)
-                        .accessibilityLabel("경과 시간 \(vm.seconds)초")
+                    HStack(spacing: 8) {
+                        Text("\(vm.seconds / 60):\(String(format: "%02d", vm.seconds % 60))")
+                            .font(.semiBold13).monospacedDigit()
+                            .frame(minWidth: 48)
+                            .accessibilityLabel("경과 시간 \(vm.seconds)초")
+                        Button { showPlacementHints = true } label: {
+                            Image(systemName: "key.fill")
+                                .font(.system(size: 18, weight: .medium))
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("배치 힌트 보기")
+                        .disabled(vm.isWorking)
+                    }
                 } else if vm.screen == .leaderboard {
                     Button { Task { await vm.loadRanking() } } label: {
                         Image(systemName: "arrow.clockwise")
@@ -362,6 +377,51 @@ struct ChallengeRootView: View {
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in vm.updateElapsed() }
     }
 
+    private var placementHints: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("더 좋은 배치를 위한 힌트").font(.semiBold16)
+                Spacer()
+                Button { showPlacementHints = false } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("힌트 닫기")
+            }
+            .padding(.horizontal, 24).padding(.top, 20)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("배치하면서 참고해보세요. 힌트를 보는 동안에도 도전 시간은 계속 흘러요.")
+                        .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                    ForEach(ChallengePlacementHint.sections) { section in
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(section.title).font(.semiBold14)
+                            ForEach(section.items, id: \.self) { hint in
+                                Text(hint).font(.regular12).foregroundStyle(.secondary)
+                                    .lineSpacing(4).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 24).padding(.bottom, 28)
+            }
+        }
+        .foregroundStyle(.primary)
+        .tint(Color.voBlue)
+        .background(Color(.systemBackground))
+    }
+
+    private func resultFeedback(_ title: String, messages: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.semiBold14)
+            ForEach(messages, id: \.self) { message in
+                Text(message).font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .voGlassCard(cornerRadius: 16)
+    }
+
     private var result: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 24) {
@@ -405,22 +465,18 @@ struct ChallengeRootView: View {
                                 Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14)
                             }
                         }
-                        if score.beatAI {
-                            Label("AI보다 넓은 공간을 만들었어요", systemImage: "checkmark.circle")
-                                .font(.semiBold13).frame(maxWidth: .infinity, alignment: .leading)
-                        }
                     }
-                    if !score.displayHints.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(score.disqualified ? "실격 사유" : "더 좋은 배치를 위한 힌트")
-                                .font(.semiBold14)
-                            ForEach(score.displayHints, id: \.self) { hint in
-                                Text(hint).font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                    if score.disqualified {
+                        if !score.hints.isEmpty {
+                            resultFeedback("실격 사유", messages: score.hints)
                         }
-                        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                        .voGlassCard(cornerRadius: 16)
+                    } else {
+                        if !score.strengths.isEmpty {
+                            resultFeedback("잘한 부분", messages: score.strengths)
+                        }
+                        if !score.improvements.isEmpty {
+                            resultFeedback("아쉬운 부분", messages: score.improvements)
+                        }
                     }
                     Text("남은 도전 \(vm.remainingAttempts)회")
                         .font(.regular12).foregroundStyle(.secondary)

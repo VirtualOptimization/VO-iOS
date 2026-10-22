@@ -60,11 +60,50 @@ struct ChallengeScore: Codable {
     let totalRanked: Int
     let remainingAttempts: Int
 
-    /// Hide measurement-only clearance messages; retain advice and every disqualification reason.
-    var displayHints: [String] {
-        guard !disqualified else { return hints }
-        let measurementOnly = #"^[^\n.!?]+ 공간이\s*[0-9]+(?:\.[0-9]+)?\s*cm\s*(?:예요|에요)(?:\s*\(권장\s*[0-9]+(?:\.[0-9]+)?\s*cm\))?[.!]?\s*$"#
-        return hints.filter { $0.range(of: measurementOnly, options: .regularExpression) == nil }
+    var strengths: [String] {
+        guard !disqualified else { return [] }
+        var messages: [String] = []
+        if let safety = breakdown?["safety"], safety >= 24 {
+            messages.append(safety >= 30 ? "출입과 가구 사용 공간 항목에서 만점을 받았어요." : "출입과 가구 사용 공간 항목에서 좋은 점수를 받았어요.")
+        }
+        if let principles = breakdown?["principles"], principles >= 24 {
+            messages.append(principles >= 30 ? "가구 배치 원칙을 잘 지켜 만점을 받았어요." : "가구의 위치와 방향이 배치 원칙에 잘 맞는 편이에요.")
+        }
+        if beatAI {
+            messages.append("AI 배치보다 넓은 사용 가능 공간을 확보했어요.")
+        } else if let space = breakdown?["space"], space >= 32 {
+            messages.append(space >= 40 ? "공간 활용 항목에서 만점을 받았어요." : "공간 활용 항목에서 좋은 점수를 받았어요.")
+        }
+        return messages
+    }
+
+    var improvements: [String] {
+        guard !disqualified else { return [] }
+        var messages: [String] = []
+        if let safety = breakdown?["safety"], safety < 30 {
+            if let door = breakdown?["door_clearance"], door < 15 {
+                messages.append("문 앞 통행 공간이 가구로 막힌 부분이 있어 아쉬워요.")
+            }
+            if let use = breakdown?["furniture_use"], use < 15 {
+                messages.append("가구를 사용하기 위한 주변 공간이 충분하지 않은 부분이 있어요.")
+            }
+            if messages.isEmpty { messages.append("출입과 가구 사용 공간 항목의 점수가 아쉬워요.") }
+        }
+        if let principles = breakdown?["principles"], principles < 30 {
+            let findings: [String: String] = [
+                "침대 머리를 벽에 붙여보세요": "침대 머리가 벽에서 떨어져 있어 배치 원칙 점수가 줄었어요.",
+                "침대 머리가 문 있는 벽에 있어요": "침대 머리가 문이 있는 벽에 놓인 점이 아쉬워요.",
+                "누웠을 때 문이 앞에 보이면 더 좋아요": "침대에서 문이 정면으로 보이지 않는 점이 아쉬워요.",
+                "옷장은 문 쪽 벽에 두면 좋아요": "옷장이 문 맞은편 벽에 놓인 점이 아쉬워요.",
+                "책상이 문 있는 벽을 등지고 있어요": "책상이 문이 있는 벽을 등지고 있는 점이 아쉬워요."
+            ]
+            let details = hints.compactMap { findings[$0] }
+            messages += details.isEmpty ? ["가구의 위치와 방향에서 배치 원칙에 맞지 않는 부분이 있어요."] : details
+        }
+        if let space = breakdown?["space"], space < 40 {
+            messages.append("사용 가능한 빈 공간을 더 확보할 여지가 있어요.")
+        }
+        return messages
     }
 
     enum CodingKeys: String, CodingKey {
@@ -206,4 +245,32 @@ struct ChallengeService: ChallengeServing {
         try JSONDecoder().decode(ChallengeLeaderboard.self,
                                  from: await request("leaderboard", queryItems: [URLQueryItem(name: "limit", value: "20")]))
     }
+}
+
+/// Placement guidance follows the same rules as the server scoring system.
+struct ChallengePlacementHint: Identifiable {
+    let title: String
+    let items: [String]
+    var id: String { title }
+
+    static let sections: [ChallengePlacementHint] = [
+        .init(title: "침대 위치와 방향", items: [
+            "침대 머리를 벽에 붙여보세요.",
+            "침대 머리는 문이 있는 벽을 피해 배치해보세요.",
+            "누웠을 때 문이 앞에 보이도록 방향을 잡아보세요."
+        ]),
+        .init(title: "옷장과 책상", items: [
+            "옷장은 문 맞은편 벽보다 문 쪽 벽에 배치해보세요.",
+            "책상은 문이 있는 벽을 등지지 않도록 배치해보세요."
+        ]),
+        .init(title: "이동과 가구 사용 공간", items: [
+            "문 앞을 비워 출입할 수 있는 통로를 확보해주세요.",
+            "침대 옆은 한쪽이라도 65cm 정도 비워두면 좋아요.",
+            "책상·테이블 앞은 75cm, 옷장 앞은 90cm, 수납장 앞은 70cm 정도의 사용 공간을 확보해보세요."
+        ]),
+        .init(title: "공간 활용", items: [
+            "가구 사이에 흩어진 빈 공간보다 실제로 이동하고 사용할 수 있는 공간을 확보해보세요.",
+            "가구끼리 겹치거나 방 밖으로 나가지 않도록 확인해주세요."
+        ])
+    ]
 }
