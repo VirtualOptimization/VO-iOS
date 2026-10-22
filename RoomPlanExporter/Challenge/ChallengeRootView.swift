@@ -84,6 +84,9 @@ struct ChallengeRootView: View {
         .task { await vm.loadEvent() }
         .alert("알림", isPresented: Binding(get: { vm.errorMessage != nil },
                                           set: { if !$0 { vm.errorMessage = nil } })) {
+            if vm.screen == .welcome && vm.event == nil {
+                Button("다시 시도") { Task { await vm.loadEvent() } }
+            }
             Button("확인", role: .cancel) { vm.errorMessage = nil }
         } message: { Text(vm.errorMessage ?? "") }
         .confirmationDialog("다른 참가자로 시작할까요?", isPresented: $confirmNewParticipant) {
@@ -160,48 +163,40 @@ struct ChallengeRootView: View {
 
     private var welcome: some View {
         GeometryReader { geometry in
-            ScrollView(showsIndicators: false) {
+            let compact = geometry.size.height < 520
+            VStack(spacing: 0) {
+                Spacer(minLength: compact ? 12 : 24)
+                Text("보는 것을 넘어, 최적을 찾다")
+                    .font(.semiBold14).foregroundStyle(.secondary)
+                Image("logo")
+                    .resizable().scaledToFit().frame(width: compact ? 120 : 160)
+                    .padding(.top, compact ? 10 : 16)
+                    .accessibilityLabel("V-O")
+                Text("내 손으로 바꾸는 공간")
+                    .font(.semiBold20).padding(.top, compact ? 18 : 30)
+                Text("가구를 옮기고 점수를 확인해보세요.\n나만의 배치로 랭킹에 도전할 수 있어요.")
+                    .font(.regular13).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineSpacing(5)
+                    .padding(.top, 10)
                 VStack(spacing: 0) {
-                    Spacer(minLength: 36)
-                    Text("보는 것을 넘어, 최적을 찾다")
-                        .font(.semiBold14).foregroundStyle(.secondary)
-                    Image("logo")
-                        .resizable().scaledToFit().frame(width: 160)
-                        .padding(.top, 16)
-                        .accessibilityLabel("V-O")
-                    Text("내 손으로 바꾸는 공간")
-                        .font(.semiBold20).padding(.top, 30)
-                    Text("가구를 옮기고 점수를 확인해보세요.\n나만의 배치로 랭킹에 도전할 수 있어요.")
-                        .font(.regular13).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).lineSpacing(5)
-                        .padding(.top, 10)
-                    VStack(spacing: 0) {
-                        welcomeStep("01", "참가자 정보 입력", "닉네임과 연락처를 입력해주세요")
-                        Divider()
-                        welcomeStep("02", "가구 배치하기", "방 안의 가구를 자유롭게 옮겨보세요")
-                        Divider()
-                        welcomeStep("03", "점수와 랭킹 확인", "AI 배치와 비교하고 순위를 확인해보세요")
-                    }
-                    .padding(.top, 28)
-                    Spacer(minLength: 24)
-                    if let event = vm.event {
-                        Text(event.isActive ? event.name : "지금은 참여할 수 없어요")
-                            .font(.regular12)
-                            .foregroundStyle(event.isActive ? Color.secondary : Color.red)
-                    } else if vm.isWorking {
-                        ProgressView("이벤트 확인 중…").font(.regular12)
-                    } else {
-                        Text("이벤트 정보를 다시 불러와주세요")
-                            .font(.regular12).foregroundStyle(.secondary)
-                    }
-                    Button("이벤트 새로고침") { Task { await vm.loadEvent() } }
-                        .font(.regular11).foregroundStyle(.secondary)
-                        .padding(.top, 10).padding(.bottom, 24)
-                        .disabled(vm.isWorking)
+                    welcomeStep("01", "참가자 정보 입력", "닉네임과 연락처를 입력해주세요", compact: compact)
+                    Divider()
+                    welcomeStep("02", "가구 배치하기", "방 안의 가구를 자유롭게 옮겨보세요", compact: compact)
+                    Divider()
+                    welcomeStep("03", "점수와 랭킹 확인", "AI 배치와 비교하고 순위를 확인해보세요", compact: compact)
                 }
-                .padding(.horizontal, 40)
-                .frame(minHeight: geometry.size.height)
+                .padding(.top, compact ? 16 : 28)
+                Spacer(minLength: 12)
+                if vm.isWorking {
+                    ProgressView().accessibilityLabel("이벤트 확인 중")
+                } else if vm.event?.isActive == false {
+                    Text("지금은 참여할 수 없어요")
+                        .font(.regular12).foregroundStyle(.red)
+                }
             }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 12)
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
@@ -229,7 +224,7 @@ struct ChallengeRootView: View {
         }
     }
 
-    private func welcomeStep(_ number: String, _ title: String, _ detail: String) -> some View {
+    private func welcomeStep(_ number: String, _ title: String, _ detail: String, compact: Bool) -> some View {
         HStack(alignment: .top, spacing: 16) {
             Text(number).font(.semiBold12).foregroundStyle(.secondary)
                 .padding(.top, 2)
@@ -240,7 +235,7 @@ struct ChallengeRootView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 16)
+        .padding(.vertical, compact ? 10 : 16)
     }
 
     private var entry: some View {
@@ -415,11 +410,11 @@ struct ChallengeRootView: View {
                                 .font(.semiBold13).frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    if !score.hints.isEmpty {
+                    if !score.displayHints.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(score.disqualified ? "실격 사유" : "더 좋은 배치를 위한 힌트")
                                 .font(.semiBold14)
-                            ForEach(score.hints, id: \.self) { hint in
+                            ForEach(score.displayHints, id: \.self) { hint in
                                 Text(hint).font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }

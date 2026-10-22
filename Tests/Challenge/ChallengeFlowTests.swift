@@ -88,6 +88,20 @@ final class MockChallengeAPI: ChallengeServing {
         precondition(abs(object.transform[0][2] - 1) < 0.0001 && object.transform[3] == [1,2,3,1])
         let validation = APIError.from(statusCode: 422, data: Data(#"{"detail":[{"msg":"Value error, 잘못된 좌표"}]}"#.utf8))
         precondition(validation.localizedDescription == "잘못된 좌표")
+        let measurement = "침대 옆 공간이 0cm예요 (권장 65cm)"
+        let advice = "침대 머리를 벽에 붙여보세요"
+        let actionWithMeasurement = "침대 옆 공간이 0cm예요. 침대를 옮겨 통로를 확보해주세요"
+        func score(hints: [String], disqualified: Bool = false) -> ChallengeScore {
+            ChallengeScore(attemptId: 1, totalScore: 50, maxScore: 100, disqualified: disqualified,
+                           breakdown: nil, hints: hints, beatAI: false, aiScore: 80, rank: nil,
+                           totalRanked: 1, remainingAttempts: 1)
+        }
+        precondition(score(hints: [measurement, "책상 앞 공간이 20cm예요 (권장 60cm)", advice,
+                                   actionWithMeasurement]).displayHints == [advice, actionWithMeasurement])
+        precondition(score(hints: ["침대 옆 공간이 0cm 에요"]).displayHints.isEmpty)
+        precondition(score(hints: [measurement], disqualified: true).displayHints == [measurement])
+        precondition(score(hints: []).displayHints.isEmpty)
+        print("PASS: actionable hints and disqualification reasons preserved; measurement-only hints hidden")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }
 }

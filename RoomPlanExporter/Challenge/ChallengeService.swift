@@ -59,6 +59,14 @@ struct ChallengeScore: Codable {
     let rank: Int?
     let totalRanked: Int
     let remainingAttempts: Int
+
+    /// Hide measurement-only clearance messages; retain advice and every disqualification reason.
+    var displayHints: [String] {
+        guard !disqualified else { return hints }
+        let measurementOnly = #"^[^\n.!?]+ 공간이\s*[0-9]+(?:\.[0-9]+)?\s*cm\s*(?:예요|에요)(?:\s*\(권장\s*[0-9]+(?:\.[0-9]+)?\s*cm\))?[.!]?\s*$"#
+        return hints.filter { $0.range(of: measurementOnly, options: .regularExpression) == nil }
+    }
+
     enum CodingKeys: String, CodingKey {
         case attemptId = "attempt_id", totalScore = "total_score", maxScore = "max_score"
         case disqualified, breakdown, hints, beatAI = "beat_ai", aiScore = "ai_score", rank
