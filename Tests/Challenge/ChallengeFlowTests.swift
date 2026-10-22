@@ -103,12 +103,12 @@ final class MockChallengeAPI: ChallengeServing {
         precondition(boundary.strengths.count == 3 && boundary.improvements.count == 3)
         precondition(score().strengths.isEmpty && score().improvements.isEmpty, "no fabricated feedback without scores")
         let dq = score(breakdown: ["safety": 30], disqualified: true, beatAI: true)
-        precondition(dq.strengths.isEmpty && dq.improvements.isEmpty && !dq.hints.isEmpty)
+        precondition(dq.strengths.count == 2 && dq.improvements.isEmpty, "legacy flag does not force disqualification UI")
         precondition(score(beatAI: true).strengths == ["AI 배치보다 넓은 사용 가능 공간을 확보했어요."])
         let guidance = ChallengePlacementHint.sections.flatMap(\.items)
         precondition(guidance.count == 10 && guidance.contains { $0.contains("침대 머리") }
                      && guidance.contains { $0.contains("문 앞") } && !guidance.contains { $0.contains("0cm예요") })
-        print("PASS: placement guide available before scoring; result feedback grounded in breakdown; disqualification reasons preserved")
+        print("PASS: placement guide available before scoring; result feedback grounded in breakdown; legacy disqualification flag does not override score feedback")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }
 }

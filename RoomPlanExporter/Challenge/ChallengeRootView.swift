@@ -323,12 +323,7 @@ struct ChallengeRootView: View {
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                     .voGlassCard(cornerRadius: 16)
                 }
-                Text("이런 배치는 실격될 수 있어요")
-                    .font(.semiBold14).padding(.top, 8)
-                ForEach(vm.event?.disqualifyRules ?? [], id: \.self) { rule in
-                    Label(rule, systemImage: "exclamationmark.circle")
-                        .font(.regular12).foregroundStyle(.secondary)
-                }
+
             }
             .padding(.horizontal, 24).padding(.bottom, 28)
         }
@@ -427,16 +422,15 @@ struct ChallengeRootView: View {
             VStack(spacing: 24) {
                 if let score = vm.result {
                     VStack(spacing: 10) {
-                        Text(score.disqualified ? "배치를 다시 확인해주세요" : "나의 배치 점수")
+                        Text("나의 배치 점수")
                             .font(.regular13).foregroundStyle(.secondary)
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text("\(score.totalScore, specifier: "%.1f")")
                                 .font(.semiBold38)
-                                .foregroundStyle(score.disqualified ? Color.red : Color.primary)
+                                .foregroundStyle(Color.primary)
                             Text("/ \(score.maxScore, specifier: "%.0f")점")
                                 .font(.regular14).foregroundStyle(.secondary)
                         }
-                        if score.disqualified { Text("실격").font(.semiBold14).foregroundStyle(.red) }
                     }
                     .padding(.top, 32)
                     HStack {
@@ -445,13 +439,13 @@ struct ChallengeRootView: View {
                         resultMetric("소요 시간", "\(vm.submittedSeconds / 60)분 \(vm.submittedSeconds % 60)초")
                     }
                     .padding(18).voGlassCard(cornerRadius: 16)
-                    if !score.disqualified {
+                    if let breakdown = score.breakdown {
                         VStack(spacing: 0) {
                             ForEach(vm.event?.criteria ?? []) { criterion in
                                 HStack {
                                     Text(criterion.title).font(.regular13)
                                     Spacer()
-                                    Text("\(score.breakdown?[criterion.key] ?? 0, specifier: "%.1f") / \(criterion.maxScore, specifier: "%.0f")점")
+                                    Text("\(breakdown[criterion.key] ?? 0, specifier: "%.1f") / \(criterion.maxScore, specifier: "%.0f")점")
                                         .font(.semiBold13).monospacedDigit()
                                 }
                                 .padding(.vertical, 14)
@@ -466,17 +460,11 @@ struct ChallengeRootView: View {
                             }
                         }
                     }
-                    if score.disqualified {
-                        if !score.hints.isEmpty {
-                            resultFeedback("실격 사유", messages: score.hints)
-                        }
-                    } else {
-                        if !score.strengths.isEmpty {
-                            resultFeedback("잘한 부분", messages: score.strengths)
-                        }
-                        if !score.improvements.isEmpty {
-                            resultFeedback("아쉬운 부분", messages: score.improvements)
-                        }
+                    if !score.strengths.isEmpty {
+                        resultFeedback("잘한 부분", messages: score.strengths)
+                    }
+                    if !score.improvements.isEmpty {
+                        resultFeedback("아쉬운 부분", messages: score.improvements)
                     }
                     Text("남은 도전 \(vm.remainingAttempts)회")
                         .font(.regular12).foregroundStyle(.secondary)

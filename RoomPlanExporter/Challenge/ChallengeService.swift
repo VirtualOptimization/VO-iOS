@@ -61,7 +61,6 @@ struct ChallengeScore: Codable {
     let remainingAttempts: Int
 
     var strengths: [String] {
-        guard !disqualified else { return [] }
         var messages: [String] = []
         if let safety = breakdown?["safety"], safety >= 24 {
             messages.append(safety >= 30 ? "출입과 가구 사용 공간 항목에서 만점을 받았어요." : "출입과 가구 사용 공간 항목에서 좋은 점수를 받았어요.")
@@ -78,8 +77,13 @@ struct ChallengeScore: Codable {
     }
 
     var improvements: [String] {
-        guard !disqualified else { return [] }
         var messages: [String] = []
+        if hints.contains("가구끼리 겹쳐 있어요") {
+            messages.append("가구끼리 겹쳐 있는 부분이 있어 사용하기 불편할 수 있어요.")
+        }
+        if hints.contains("가구가 방 밖으로 나가 있어요") {
+            messages.append("가구 일부가 방 밖에 놓여 있어 배치가 아쉬워요.")
+        }
         if let safety = breakdown?["safety"], safety < 30 {
             if let door = breakdown?["door_clearance"], door < 15 {
                 messages.append("문 앞 통행 공간이 가구로 막힌 부분이 있어 아쉬워요.")
