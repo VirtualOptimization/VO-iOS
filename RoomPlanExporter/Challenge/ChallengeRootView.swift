@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 
 struct ChallengeRootView: View {
+    var onClose: (() -> Void)? = nil
     @StateObject private var vm = ChallengeViewModel()
     @StateObject private var editSession = FurnitureEditSession()
     @State private var name = ""
@@ -22,6 +23,19 @@ struct ChallengeRootView: View {
         && consent
     }
 
+    private var isPlaying: Bool { vm.screen == .game || vm.screen == .submitting }
+
+    private var screenTitle: String {
+        switch vm.screen {
+        case .welcome, .loading: "가구 배치 챌린지"
+        case .entry: "참가자 정보"
+        case .criteria: "채점 기준"
+        case .game, .submitting: "가구 배치"
+        case .result: "도전 결과"
+        case .leaderboard: "챌린지 랭킹"
+        }
+    }
+
     private func restart() {
         vm.restart()
         name = ""
@@ -29,21 +43,38 @@ struct ChallengeRootView: View {
         consent = false
     }
 
+    private func goBack() {
+        focusedField = nil
+        switch vm.screen {
+        case .entry, .criteria: vm.screen = .welcome
+        case .game, .submitting: confirmExit = true
+        case .result: restart()
+        case .leaderboard: vm.closeRanking()
+        case .welcome, .loading: break
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            banner
             switch vm.screen {
             case .welcome: welcome
             case .entry: entry
             case .criteria: criteria
-            case .loading: ProgressView("방을 준비하고 있어요…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .loading:
+                ProgressView("방을 준비하고 있어요…")
+                    .font(.regular13)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .game, .submitting: game
             case .result: result
             case .leaderboard: leaderboard
             }
         }
-        .foregroundStyle(ChallengePalette.ink)
-        .background(ChallengePalette.background.ignoresSafeArea())
-        .preferredColorScheme(.light)
+        .font(.regular13)
+        .foregroundStyle(.primary)
+        .tint(Color.voBlue)
+        .background(Color(.systemBackground).ignoresSafeArea())
+        .interactiveDismissDisabled(isPlaying || vm.isWorking || vm.hasPendingSubmission)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -72,341 +103,442 @@ struct ChallengeRootView: View {
         } message: { Text("현재 배치는 저장되지 않아요.") }
     }
 
-    private var welcome: some View {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 0) {
+    // Same banner, fonts and controls as the room viewer and scan completion screens.
+    private var banner: some View {
+        ZStack {
+            Text(screenTitle)
+                .font(.semiBold14)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 68)
+                .frame(maxWidth: .infinity)
             HStack {
-                Text("V-O").font(.system(size: 22, weight: .black, design: .rounded))
+                if vm.screen == .welcome || vm.screen == .loading {
+                    Image("logo_white")
+                        .resizable().scaledToFit().frame(height: 42)
+                        .accessibilityHidden(true)
+                } else {
+                    Button(action: goBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("이전 화면")
+                    .disabled(vm.isWorking || vm.hasPendingSubmission)
+                }
                 Spacer()
-                Text("CHALLENGE")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .tracking(2)
-                    .foregroundStyle(ChallengePalette.blue)
-                    .padding(.horizontal, 13).padding(.vertical, 8)
-                    .background(ChallengePalette.blue.opacity(0.1), in: Capsule())
-            }
-            .padding(.top, 12)
-
-            Spacer(minLength: 30)
-
-            VStack(alignment: .leading, spacing: 22) {
-                Image(systemName: "square.3.layers.3d.top.filled")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.white)
-                    .frame(width: 84, height: 84)
-                    .background(.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 24))
-                Text("내 방을 더 좋게,\n직접 배치해 볼까요?")
-                    .font(.system(size: 32, weight: .bold))
-                    .lineSpacing(4)
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("가구를 옮기고 점수를 확인해 보세요.\n나만의 배치로 순위에 도전할 수 있어요.")
-                    .font(.system(size: 17))
-                    .lineSpacing(4)
-                    .foregroundStyle(.white.opacity(0.93))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(28)
-            .background(
-                LinearGradient(colors: [ChallengePalette.blue, ChallengePalette.deepBlue],
-                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 28)
-            )
-
-            HStack(spacing: 8) {
-                welcomeStep("01", "정보 입력")
-                welcomeStep("02", "가구 배치")
-                welcomeStep("03", "점수 확인")
-            }
-            .padding(.top, 18)
-
-            Spacer(minLength: 24)
-
-            if let event = vm.event {
-                Text(event.isActive ? event.name : "지금은 참여할 수 없어요")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(event.isActive ? ChallengePalette.muted : .red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 12)
-            } else {
-                ProgressView("이벤트 확인 중…")
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 12)
-            }
-            if vm.hasSession {
-                Button("내 도전 이어하기") { Task { await vm.resume() } }
-                    .buttonStyle(ChallengePrimaryButtonStyle())
+                if isPlaying {
+                    Text("\(vm.seconds / 60):\(String(format: "%02d", vm.seconds % 60))")
+                        .font(.semiBold13).monospacedDigit()
+                        .frame(minWidth: 48)
+                        .accessibilityLabel("경과 시간 \(vm.seconds)초")
+                } else if vm.screen == .leaderboard {
+                    Button { Task { await vm.loadRanking() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 17, weight: .medium))
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("랭킹 새로고침")
                     .disabled(vm.isWorking)
-                Button("다른 참가자 등록") { confirmNewParticipant = true }
-                    .buttonStyle(ChallengeSecondaryButtonStyle())
-                    .disabled(vm.hasPendingSubmission || vm.isWorking)
-            } else {
-            Button("방 편집 시작하기") { vm.screen = .entry }
-                .buttonStyle(ChallengePrimaryButtonStyle())
-                .disabled(vm.event?.isActive != true)
-                .opacity(vm.event?.isActive == true ? 1 : 0.5)
+                } else if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("챌린지 닫기")
+                    .disabled(vm.isWorking || vm.hasPendingSubmission)
+                }
             }
-            Button("이벤트 새로고침") { Task { await vm.loadEvent() } }
-                .disabled(vm.isWorking)
-            Button("현재 랭킹 보기") { Task { await vm.loadRanking() } }
-                .buttonStyle(ChallengeSecondaryButtonStyle())
-                .disabled(vm.event == nil || vm.isWorking)
-                .padding(.top, 10)
+            .foregroundStyle(.white)
+            .buttonStyle(.plain)
         }
-        .padding(24)
+        .frame(minHeight: 52)
+        .padding(.horizontal, 20)
+        .voGlassBanner()
+    }
+
+    private var welcome: some View {
+        GeometryReader { geometry in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 36)
+                    Text("보는 것을 넘어, 최적을 찾다")
+                        .font(.semiBold14).foregroundStyle(.secondary)
+                    Image("logo")
+                        .resizable().scaledToFit().frame(width: 160)
+                        .padding(.top, 16)
+                        .accessibilityLabel("V-O")
+                    Text("내 손으로 바꾸는 공간")
+                        .font(.semiBold20).padding(.top, 30)
+                    Text("가구를 옮기고 점수를 확인해보세요.\n나만의 배치로 랭킹에 도전할 수 있어요.")
+                        .font(.regular13).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).lineSpacing(5)
+                        .padding(.top, 10)
+                    VStack(spacing: 0) {
+                        welcomeStep("01", "참가자 정보 입력", "닉네임과 연락처를 입력해주세요")
+                        Divider()
+                        welcomeStep("02", "가구 배치하기", "방 안의 가구를 자유롭게 옮겨보세요")
+                        Divider()
+                        welcomeStep("03", "점수와 랭킹 확인", "AI 배치와 비교하고 순위를 확인해보세요")
+                    }
+                    .padding(.top, 28)
+                    Spacer(minLength: 24)
+                    if let event = vm.event {
+                        Text(event.isActive ? event.name : "지금은 참여할 수 없어요")
+                            .font(.regular12)
+                            .foregroundStyle(event.isActive ? Color.secondary : Color.red)
+                    } else if vm.isWorking {
+                        ProgressView("이벤트 확인 중…").font(.regular12)
+                    } else {
+                        Text("이벤트 정보를 다시 불러와주세요")
+                            .font(.regular12).foregroundStyle(.secondary)
+                    }
+                    Button("이벤트 새로고침") { Task { await vm.loadEvent() } }
+                        .font(.regular11).foregroundStyle(.secondary)
+                        .padding(.top, 10).padding(.bottom, 24)
+                        .disabled(vm.isWorking)
+                }
+                .padding(.horizontal, 40)
+                .frame(minHeight: geometry.size.height)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 12) {
+                if vm.hasSession {
+                    Button("내 도전 이어하기") { Task { await vm.resume() } }
+                        .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
+                } else {
+                    Button("챌린지 시작하기") { vm.screen = .entry }
+                        .buttonStyle(VOFilledButtonStyle())
+                        .disabled(vm.event?.isActive != true || vm.isWorking)
+                        .opacity(vm.event?.isActive == true ? 1 : 0.45)
+                }
+                Button("현재 랭킹 보기") { Task { await vm.loadRanking() } }
+                    .buttonStyle(VOOutlineButtonStyle())
+                    .disabled(vm.event == nil || vm.isWorking)
+                if vm.hasSession {
+                    Button("다른 참가자 등록") { confirmNewParticipant = true }
+                        .font(.semiBold14).foregroundStyle(.secondary)
+                        .disabled(vm.hasPendingSubmission || vm.isWorking)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 24)
+            .background(Color(.systemBackground))
         }
     }
 
-    private func welcomeStep(_ number: String, _ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(number).font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(ChallengePalette.blue)
-            Text(title).font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(ChallengePalette.ink)
-                .lineLimit(1).minimumScaleFactor(0.85)
+    private func welcomeStep(_ number: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Text(number).font(.semiBold12).foregroundStyle(.secondary)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.semiBold13)
+                Text(detail).font(.regular11).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(13)
-        .background(.white, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 16)
     }
 
     private var entry: some View {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 22) {
-            Button("〈 돌아가기") { vm.screen = .welcome }
-                .font(.body.weight(.semibold))
-            Text("참가자 정보").font(.largeTitle.bold())
-            Text("닉네임은 순위표에 그대로 표시돼요.").font(.body).foregroundStyle(.secondary)
-            TextField("닉네임 (순위표에 그대로 표시돼요)", text: $name)
-                .textInputAutocapitalization(.never)
-                .submitLabel(.next).focused($focusedField, equals: .name)
-                .onSubmit { focusedField = .phone }
-                .padding(16).background(.white, in: RoundedRectangle(cornerRadius: 14))
-            TextField("휴대전화 번호", text: $phone)
-                .keyboardType(.phonePad).textContentType(.telephoneNumber)
-                .focused($focusedField, equals: .phone)
-                .padding(16).background(.white, in: RoundedRectangle(cornerRadius: 14))
-            Toggle("개인정보 수집·이용에 동의합니다.", isOn: $consent).font(.body)
-            Text("수집 항목: 닉네임, 전화번호\n이용 목적: 순위 확인 및 경품 안내\n보관 기간: 전시 종료 후 30일 이내 파기\n닉네임은 순위표에 공개됩니다. 동의하지 않으면 참여할 수 없습니다.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Button("기준 확인하기") { focusedField = nil; Task {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("참가자 정보를 입력해주세요")
+                    .font(.semiBold20).padding(.top, 32)
+                Text("닉네임은 랭킹에 그대로 표시돼요.")
+                    .font(.regular12).foregroundStyle(.secondary).padding(.top, 10)
+                VStack(spacing: 0) {
+                    UnderlineField(placeholder: "닉네임을 입력하세요 (최대 12자)", text: $name)
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next).onSubmit { focusedField = .phone }
+                        .accessibilityLabel("닉네임")
+                    UnderlineField(placeholder: "휴대전화 번호를 입력하세요", text: $phone)
+                        .keyboardType(.phonePad).textContentType(.telephoneNumber)
+                        .focused($focusedField, equals: .phone)
+                        .accessibilityLabel("휴대전화 번호")
+                }
+                .padding(.top, 28)
+                Toggle(isOn: $consent) {
+                    Text("개인정보 수집·이용에 동의합니다")
+                        .font(.regular12)
+                }
+                .toggleStyle(CheckboxToggleStyle())
+                .padding(.top, 28)
+                Text("수집 항목: 닉네임, 전화번호\n이용 목적: 순위 확인 및 경품 안내\n보관 기간: 전시 종료 후 30일 이내 파기\n\n닉네임은 순위표에 공개됩니다.\n동의하지 않으면 참여할 수 없습니다.")
+                    .font(.regular11).foregroundStyle(.secondary).lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 16).padding(.bottom, 28)
+            }
+            .padding(.horizontal, 40)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("기준 확인하기") {
+                focusedField = nil
+                Task {
                     await vm.start(name: name, phone: phone)
                     if vm.hasSession { name = ""; phone = ""; consent = false }
-                } }
-                .buttonStyle(ChallengePrimaryButtonStyle()).disabled(!validEntry || vm.isWorking)
-                .opacity(validEntry && !vm.isWorking ? 1 : 0.5)
-        }
-        .padding(24)
+                }
+            }
+            .buttonStyle(VOFilledButtonStyle()).disabled(!validEntry || vm.isWorking)
+            .opacity(validEntry && !vm.isWorking ? 1 : 0.45)
+            .padding(.horizontal, 40).padding(.top, 16).padding(.bottom, 24)
+            .background(Color(.systemBackground))
         }
     }
 
     private var criteria: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("채점 기준").font(.largeTitle.bold())
-                Text("가구를 옮기기 전에 기준을 확인해 주세요.")
-                    .font(.body).foregroundStyle(.secondary)
-                if let event = vm.event {
-                    ForEach(event.criteria) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text(item.title).font(.title3.bold())
-                                Spacer()
-                                Text("\(item.maxScore, specifier: "%.0f")점")
-                                    .font(.headline).foregroundStyle(Color.voBlue)
-                            }
-                            Text(item.description).font(.body)
-                        }
-                        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                    }
-                    Text("실격 기준").font(.title3.bold())
-                    ForEach(event.disqualifyRules, id: \.self) { rule in
-                        Label(rule, systemImage: "exclamationmark.triangle")
-                            .font(.body).foregroundStyle(.red)
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("가구를 옮기기 전에\n채점 기준을 확인해주세요")
+                        .font(.semiBold20).lineSpacing(4)
+                    Text("세 가지 기준으로 배치를 평가해요.")
+                        .font(.regular12).foregroundStyle(.secondary)
                 }
-                Button("확인했어요 · 편집 시작") { Task { await vm.loadRoom() } }
-                    .buttonStyle(ChallengePrimaryButtonStyle()).disabled(vm.isWorking)
-                    .padding(.top, 12)
+                .padding(.top, 28)
+                ForEach(vm.event?.criteria ?? []) { item in
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(item.title).font(.semiBold16)
+                            Spacer()
+                            Text("\(item.maxScore, specifier: "%.0f")점").font(.semiBold14)
+                        }
+                        Text(item.description).font(.regular12)
+                            .foregroundStyle(.secondary).lineSpacing(4)
+                    }
+                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    .voGlassCard(cornerRadius: 16)
+                }
+                Text("이런 배치는 실격될 수 있어요")
+                    .font(.semiBold14).padding(.top, 8)
+                ForEach(vm.event?.disqualifyRules ?? [], id: \.self) { rule in
+                    Label(rule, systemImage: "exclamationmark.circle")
+                        .font(.regular12).foregroundStyle(.secondary)
+                }
             }
-            .padding(20)
+            .padding(.horizontal, 24).padding(.bottom, 28)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("확인했어요 · 배치 시작하기") { Task { await vm.loadRoom() } }
+                .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
+                .padding(.horizontal, 40).padding(.top, 16).padding(.bottom, 24)
+                .background(Color(.systemBackground))
         }
     }
 
     private var game: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { confirmExit = true } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
-                    .disabled(vm.hasPendingSubmission || vm.isWorking)
-                Spacer()
-                Text("배치하기").font(.title3.bold())
-                Spacer()
-                Text("\(vm.seconds / 60):\(String(format: "%02d", vm.seconds % 60))")
-                    .monospacedDigit().font(.title3.bold()).frame(minWidth: 70)
-            }
-            .padding(.horizontal, 16)
             if let room = vm.room {
                 FurnitureRealityKitView(detail: room.detail, allowsLocalFallback: true,
-                                        onAssetFailure: { message in vm.sceneError = message; vm.sceneReady = false },
+                                        onAssetFailure: { vm.sceneError = $0; vm.sceneReady = false },
                                         onSceneReady: { vm.sceneLoaded() },
                                         editMode: !vm.hasPendingSubmission && !vm.isWorking, editSession: editSession)
                     .id(room.detail.renderingID)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let message = vm.sceneError {
-                Text(message).font(.footnote).foregroundStyle(.red)
-                Button("방 다시 불러오기") { Task { await vm.loadRoom() } }.disabled(vm.isWorking)
-            } else if !vm.sceneReady { ProgressView("가구를 불러오는 중…").padding(8) }
-            Text(vm.hasPendingSubmission
-                 ? "이전 제출의 응답을 확인 중이에요. 같은 배치로 다시 제출해 주세요."
-                 : "가구를 탭해서 이동 · 두 손가락으로 시점 조절")
-                .font(.subheadline).multilineTextAlignment(.center).padding(.vertical, 10)
-            HStack(spacing: 12) {
-                Button("초기화") { editSession.cancelPendingEdits() }
-                    .buttonStyle(ChallengeSecondaryButtonStyle()).disabled(vm.hasPendingSubmission || vm.isWorking)
-                Button(vm.isWorking ? "제출 중…" : (vm.hasPendingSubmission ? "제출 재시도" : "배치 제출")) {
-                    confirmSubmit = true
+            VStack(spacing: 14) {
+                if let message = vm.sceneError {
+                    Text(message).font(.regular12).foregroundStyle(.red)
+                    Button("방 다시 불러오기") { Task { await vm.loadRoom() } }.disabled(vm.isWorking)
+                } else if !vm.sceneReady {
+                    ProgressView("가구를 불러오는 중…").font(.regular12)
                 }
-                    .buttonStyle(ChallengePrimaryButtonStyle()).disabled(vm.isWorking || !vm.sceneReady)
+                Label(vm.hasPendingSubmission
+                      ? "같은 배치로 제출을 다시 시도해주세요"
+                      : "가구를 탭해서 이동 · 두 손가락으로 시점 조절",
+                      systemImage: "info.circle")
+                    .font(.regular11).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 12) {
+                    Button("초기화") { editSession.cancelPendingEdits() }
+                        .buttonStyle(VOOutlineButtonStyle()).disabled(vm.hasPendingSubmission || vm.isWorking)
+                    Button(vm.isWorking ? "제출 중…" : (vm.hasPendingSubmission ? "제출 재시도" : "배치 제출")) {
+                        confirmSubmit = true
+                    }
+                    .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking || !vm.sceneReady)
+                }
             }
-            .padding(.horizontal, 20).padding(.bottom, 16)
+            .padding(.horizontal, 24).padding(.vertical, 20)
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            vm.updateElapsed()
-        }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in vm.updateElapsed() }
     }
 
     private var result: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                Text("도전 결과").font(.title.bold())
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 24) {
                 if let score = vm.result {
-                    Text("\(score.totalScore, specifier: "%.1f") / \(score.maxScore, specifier: "%.0f")점")
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundStyle(score.disqualified ? .red : Color.voBlue)
-                        .minimumScaleFactor(0.7).lineLimit(1)
-                    if score.disqualified {
-                        Text("실격 · 다시 확인해 주세요")
-                            .font(.title3.bold()).foregroundStyle(.red)
-                    } else {
-                        ForEach(vm.event?.criteria ?? []) { criterion in
-                            HStack {
-                                Text(criterion.title)
-                                Spacer()
-                                Text("\(score.breakdown?[criterion.key] ?? 0, specifier: "%.1f") / \(criterion.maxScore, specifier: "%.0f")")
-                            }
-                            .font(.body).padding(15)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                    VStack(spacing: 10) {
+                        Text(score.disqualified ? "배치를 다시 확인해주세요" : "나의 배치 점수")
+                            .font(.regular13).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\(score.totalScore, specifier: "%.1f")")
+                                .font(.semiBold38)
+                                .foregroundStyle(score.disqualified ? Color.red : Color.primary)
+                            Text("/ \(score.maxScore, specifier: "%.0f")점")
+                                .font(.regular14).foregroundStyle(.secondary)
                         }
-                        if score.beatAI {
-                            Label("AI보다 넓은 공간을 만들었어요!", systemImage: "sparkles")
-                                .font(.headline).foregroundStyle(Color.voBlue)
-                                .padding(14).background(Color.voBlue.opacity(0.12), in: Capsule())
+                        if score.disqualified { Text("실격").font(.semiBold14).foregroundStyle(.red) }
+                    }
+                    .padding(.top, 32)
+                    HStack {
+                        resultMetric("현재 순위", score.rank.map { "\($0)위 / \(score.totalRanked)명" } ?? "순위 없음")
+                        Divider().frame(height: 36)
+                        resultMetric("소요 시간", "\(vm.submittedSeconds / 60)분 \(vm.submittedSeconds % 60)초")
+                    }
+                    .padding(18).voGlassCard(cornerRadius: 16)
+                    if !score.disqualified {
+                        VStack(spacing: 0) {
+                            ForEach(vm.event?.criteria ?? []) { criterion in
+                                HStack {
+                                    Text(criterion.title).font(.regular13)
+                                    Spacer()
+                                    Text("\(score.breakdown?[criterion.key] ?? 0, specifier: "%.1f") / \(criterion.maxScore, specifier: "%.0f")점")
+                                        .font(.semiBold13).monospacedDigit()
+                                }
+                                .padding(.vertical, 14)
+                                Divider()
+                            }
                         }
                         if let aiScore = score.aiScore {
-                            Text("AI 점수 \(aiScore, specifier: "%.1f")점")
-                                .font(.title3.weight(.semibold))
+                            HStack {
+                                Label("AI 배치 점수", systemImage: "sparkles").font(.regular13)
+                                Spacer()
+                                Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14)
+                            }
+                        }
+                        if score.beatAI {
+                            Label("AI보다 넓은 공간을 만들었어요", systemImage: "checkmark.circle")
+                                .font(.semiBold13).frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    Text(score.disqualified ? "실격 사유" : "개선 힌트")
-                        .font(.headline).frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(score.hints, id: \.self) { hint in
-                        Text(hint).font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(14).background(.white, in: RoundedRectangle(cornerRadius: 12))
+                    if !score.hints.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(score.disqualified ? "실격 사유" : "더 좋은 배치를 위한 힌트")
+                                .font(.semiBold14)
+                            ForEach(score.hints, id: \.self) { hint in
+                                Text(hint).font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                        .voGlassCard(cornerRadius: 16)
                     }
-                    if let rank = score.rank {
-                        Text("현재 순위 \(rank)위 / \(score.totalRanked)명").font(.title3.bold())
-                    } else {
-                        Text("순위 없음").font(.title3.bold())
-                    }
-                    Text("걸린 시간 \(vm.submittedSeconds / 60)분 \(vm.submittedSeconds % 60)초")
+                    Text("남은 도전 \(vm.remainingAttempts)회")
+                        .font(.regular12).foregroundStyle(.secondary)
                 }
-                Text("남은 도전 \(vm.remainingAttempts)회").foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 24).padding(.bottom, 24)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 12) {
                 if vm.remainingAttempts > 0, vm.event?.isActive == true {
                     Button("다시 도전하기") { Task { await vm.loadRoom() } }
-                        .buttonStyle(ChallengePrimaryButtonStyle()).disabled(vm.isWorking)
+                        .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
+                    Button("랭킹 보기") { Task { await vm.loadRanking() } }
+                        .buttonStyle(VOOutlineButtonStyle()).disabled(vm.isWorking)
+                } else {
+                    Button("랭킹 보기") { Task { await vm.loadRanking() } }
+                        .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
                 }
-                Button("랭킹 보기") { Task { await vm.loadRanking() } }.buttonStyle(ChallengePrimaryButtonStyle())
-                Button("처음으로") { restart() }.buttonStyle(ChallengeSecondaryButtonStyle())
+                Button("처음으로") { restart() }
+                    .font(.semiBold14).foregroundStyle(.secondary).padding(.top, 4)
+                    .disabled(vm.isWorking)
             }
-            .padding(20)
+            .padding(.horizontal, 40).padding(.top, 16).padding(.bottom, 24)
+            .background(Color(.systemBackground))
         }
+    }
+
+    private func resultMetric(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 8) {
+            Text(title).font(.regular11).foregroundStyle(.secondary)
+            Text(value).font(.semiBold14)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var leaderboard: some View {
-        VStack(spacing: 16) {
-            Text("V-O Challenge 랭킹").font(.title.bold())
-            if let ranking = vm.ranking {
-                Text(ranking.aiScore.map {
-                    "참가자 \(ranking.totalRanked)명 · AI \($0.formatted(.number.precision(.fractionLength(1))))점"
-                } ?? "참가자 \(ranking.totalRanked)명")
-                    .font(.body).foregroundStyle(.secondary)
-            }
-            ScrollView {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("현재 랭킹").font(.semiBold20)
+                    Spacer()
+                    if let ranking = vm.ranking {
+                        Text("\(ranking.totalRanked)명 참여")
+                            .font(.regular12).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 30)
+                if let event = vm.event {
+                    Text(event.name).font(.regular12).foregroundStyle(.secondary).padding(.top, 8)
+                }
+                if let aiScore = vm.ranking?.aiScore {
+                    HStack {
+                        Label("AI 배치 점수", systemImage: "sparkles").font(.regular13)
+                        Spacer()
+                        Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14).monospacedDigit()
+                    }
+                    .padding(18).voGlassCard(cornerRadius: 16).padding(.top, 24)
+                }
+                HStack(spacing: 8) {
+                    Text("순위").frame(width: 40)
+                    Text("닉네임").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("소요 시간").frame(width: 64, alignment: .trailing)
+                    Text("점수").frame(width: 58, alignment: .trailing)
+                }
+                .font(.regular11).foregroundStyle(.secondary)
+                .padding(.top, 28).padding(.bottom, 12)
+                Divider()
                 if vm.ranking?.entries.isEmpty == true {
-                    Text("아직 등록된 기록이 없어요.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+                    VStack(spacing: 10) {
+                        Image(systemName: "trophy").font(.system(size: 32)).foregroundStyle(Color.voBlue)
+                        Text("아직 등록된 기록이 없어요").font(.semiBold14)
+                        Text("첫 번째 배치에 도전해보세요").font(.regular12).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 48)
                 }
                 ForEach(vm.ranking?.entries ?? []) { item in
-                    HStack(spacing: 14) {
-                        Text("\(item.rank)위").font(.title3.bold()).frame(width: 52)
-                        Text(item.name).font(.body)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("\(item.totalScore, specifier: "%.1f")점").font(.headline)
-                            if let seconds = item.elapsedSeconds {
-                                Text("\(seconds / 60)분 \(seconds % 60)초")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(16)
-                    .background(item.rank <= 3 ? Color.voBlue.opacity(0.15) : .white,
-                                in: RoundedRectangle(cornerRadius: 14))
+                    rankingRow(item)
+                    Divider()
                 }
+                Text("참가자별 가장 높은 점수의 기록이 표시돼요.")
+                    .font(.regular11).foregroundStyle(.secondary)
+                    .padding(.top, 18).padding(.bottom, 24)
             }
-            Button("새로고침") { Task { await vm.loadRanking() } }
-                .buttonStyle(ChallengeSecondaryButtonStyle())
-            Button("돌아가기") { vm.closeRanking() }.buttonStyle(ChallengePrimaryButtonStyle())
+            .padding(.horizontal, 24)
         }
-        .padding(20)
+        .refreshable { await vm.loadRanking() }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("돌아가기") { vm.closeRanking() }
+                .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
+                .padding(.horizontal, 40).padding(.top, 16).padding(.bottom, 24)
+                .background(Color(.systemBackground))
+        }
     }
-}
 
-private enum ChallengePalette {
-    static let background = Color(red: 0.966, green: 0.967, blue: 0.974)
-    static let ink = Color(red: 0.11, green: 0.16, blue: 0.25)
-    static let muted = Color(red: 0.39, green: 0.44, blue: 0.52)
-    static let blue = Color(red: 0.20, green: 0.39, blue: 0.72)
-    static let deepBlue = Color(red: 0.10, green: 0.24, blue: 0.51)
-}
-
-private struct ChallengePrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 18, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 58)
-            .background(ChallengePalette.blue, in: RoundedRectangle(cornerRadius: 18))
-            .opacity(configuration.isPressed ? 0.82 : 1)
-    }
-}
-
-private struct ChallengeSecondaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(ChallengePalette.blue)
-            .frame(maxWidth: .infinity, minHeight: 58)
-            .background(.white, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(ChallengePalette.blue.opacity(0.35)))
-            .opacity(configuration.isPressed ? 0.82 : 1)
+    private func rankingRow(_ item: ChallengeLeaderboardEntry) -> some View {
+        HStack(spacing: 8) {
+            Text("\(item.rank)")
+                .font(.semiBold14).monospacedDigit()
+                .frame(width: 32, height: 32)
+                .background(item.rank <= 3 ? Color.voBlue.opacity(0.2) : .clear, in: Circle())
+                .frame(width: 40)
+                .accessibilityLabel("\(item.rank)위")
+            Text(item.name).font(.semiBold13)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
+            Text(item.elapsedSeconds.map { "\($0 / 60)분 \($0 % 60)초" } ?? "—")
+                .font(.regular11).foregroundStyle(.secondary).monospacedDigit()
+                .frame(width: 64, alignment: .trailing)
+            Text("\(item.totalScore, specifier: "%.1f")점")
+                .font(.semiBold13).monospacedDigit()
+                .frame(width: 58, alignment: .trailing)
+        }
+        .padding(.vertical, 16)
+        .accessibilityElement(children: .combine)
     }
 }

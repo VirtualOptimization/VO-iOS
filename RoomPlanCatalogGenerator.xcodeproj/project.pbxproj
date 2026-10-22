@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        CC3000000000000000000001 /* VOGlassStyles.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB63000000000000AB630001 /* VOGlassStyles.swift */; };
+        CC3000000000000000000002 /* VOFormStyles.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = CC3000000000000000000003 /* VOFormStyles.swift */; };
+        CC3000000000000000000004 /* VOFormStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3000000000000000000003 /* VOFormStyles.swift */; };
 		CC1000000000000000000001 /* RoomViewerView.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = 070B96A72F86451700C0E62A /* RoomViewerView.swift */; };
 		CC1000000000000000000002 /* RoomOptimizerService.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = 070B96A92F8646D900C0E62A /* RoomOptimizerService.swift */; };
 		CC1000000000000000000003 /* APIConfig.swift in Challenge Sources */ = {isa = PBXBuildFile; fileRef = AB41000000000000AB410001 /* APIConfig.swift */; };
@@ -72,6 +75,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        CC3000000000000000000003 /* VOFormStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VOFormStyles.swift; sourceTree = "<group>"; };
 		AB70000000000000AB700001 /* AssistantService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantService.swift; sourceTree = "<group>"; };
 		AB71000000000000AB710001 /* RoomFitCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomFitCalculator.swift; sourceTree = "<group>"; };
 		AB72000000000000AB720001 /* AssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViewModel.swift; sourceTree = "<group>"; };
@@ -240,6 +244,7 @@
 				AB08000000000000AB080001 /* LoadingView.swift */,
 				AB07000000000000AB070001 /* VOButtonStyles.swift */,
 				AB63000000000000AB630001 /* VOGlassStyles.swift */,
+                CC3000000000000000000003 /* VOFormStyles.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -498,6 +503,8 @@
 				CC1000000000000000000004 /* LiDARFurnitureScanView.swift in Challenge Sources */,
 				CC1000000000000000000005 /* RoomPlanCatalog.swift in Challenge Sources */,
 				CC1000000000000000000006 /* VOButtonStyles.swift in Challenge Sources */,
+                CC3000000000000000000001 /* VOGlassStyles.swift in Challenge Sources */,
+                CC3000000000000000000002 /* VOFormStyles.swift in Challenge Sources */,
 				CC1000000000000000000007 /* KeychainTokenStore.swift in Challenge Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -521,6 +528,7 @@
 				AB06000000000000AB060000 /* RoomResultView.swift in Sources */,
 				AB07000000000000AB070000 /* VOButtonStyles.swift in Sources */,
 				AB63000000000000AB630000 /* VOGlassStyles.swift in Sources */,
+                CC3000000000000000000004 /* VOFormStyles.swift in Sources */,
 				AB08000000000000AB080000 /* LoadingView.swift in Sources */,
 				AB09000000000000AB090000 /* UploadCompleteView.swift in Sources */,
 				AB11000000000000AB110000 /* InquiryView.swift in Sources */,

@@ -31,14 +31,7 @@ struct MainView: View {
         }
         .onAppear { vm.syncRoomsWithServer() }
         .fullScreenCover(isPresented: $showChallenge) {
-            NavigationStack {
-                ChallengeRootView()
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("닫기") { showChallenge = false }
-                        }
-                    }
-            }
+            ChallengeRootView(onClose: { showChallenge = false })
         }
         .alert("불러오기 실패", isPresented: .constant(vm.inquiryError != nil), actions: {
             Button("확인") { vm.inquiryError = nil }
