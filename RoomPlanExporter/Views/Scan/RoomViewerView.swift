@@ -10,6 +10,15 @@ import SwiftUI
 import RealityKit
 import RoomPlan
 
+/// LiDAR로 인식한 벽의 공통 표시색.
+/// #17233D를 반투명으로 사용해 흰색 벽 대신 모든 공간 화면에서 동일하게 보이게 한다.
+private let roomWallNavy = UIColor(
+    red: 23.0 / 255.0,
+    green: 35.0 / 255.0,
+    blue: 61.0 / 255.0,
+    alpha: 0.72
+)
+
 /// 모든 공간 뷰어가 같은 카메라 조작 방식을 쓰도록 하는 공통 컨트롤러.
 /// 방 엔티티는 움직이지 않고 카메라만 원점을 중심으로 회전·기울기·줌을 변경한다.
 final class RoomOrbitCamera {
@@ -126,7 +135,7 @@ struct RoomViewerView: View {
     var serverModels: [UUID: URL]? = nil
     var optimizedObjects: [OptimizedObject]? = nil
     var isTransparent: Bool = false
-    var wallColor: UIColor = .white
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     var furnitureTint: UIColor? = nil
     /// true면 기본 모드에서도 Apple이 구워낸 USDZ 대신, 벽/바닥/가구를 따로 그리는
@@ -201,7 +210,7 @@ struct RealityKitRoomView: UIViewRepresentable {
     var isTransparent: Bool = false
     /// true면 isTransparent와 무관하게 카탈로그/색상 커스터마이즈 가능한 렌더러 사용
     var useCatalogRenderer: Bool = false
-    var wallColor: UIColor = .white
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     var furnitureTint: UIColor? = nil
 
@@ -353,7 +362,9 @@ struct RealityKitRoomView: UIViewRepresentable {
     // MARK: - 씬 렌더링 (named entities - 최적화 애니메이션용)
 
     private func renderSurfaces(_ room: CapturedRoom, in anchor: AnchorEntity) {
-        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.45 : 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(
+            isTransparent ? 0.58 : wallColor.cgColor.alpha
+        )
         for wall in room.walls {
             let openings = capturedRoomOpenings(wall: wall, doors: room.doors, windows: room.windows)
             wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
@@ -536,8 +547,10 @@ struct JsonRealityKitView: UIViewRepresentable {
     @MainActor
     private func buildScene(into anchor: AnchorEntity) async {
         // 구조물
-        // 벽: 반투명 흰색, 문/창문 스킵 → 자연 간극
-        for s in roomData.walls  ?? [] { anchor.addChild(makeSurface(s, color: UIColor(white: 1.0, alpha: 0.45), depth: 0.04)) }
+        // 벽: #17233D 반투명 네이비, 문/창문 스킵 → 자연 간극
+        for s in roomData.walls  ?? [] {
+            anchor.addChild(makeSurface(s, color: roomWallNavy.withAlphaComponent(0.58), depth: 0.04))
+        }
         for s in roomData.floors ?? [] { anchor.addChild(makeSurface(s, color: UIColor.white, depth: 0.01)) }
 
         // 가구
@@ -883,6 +896,31 @@ struct FurniturePoseEdit: Encodable {
     let identifier: String
     let center: [Float]
     let rotation: [Float]
+    let dimensions: [Float]?
+    let category: String?
+    let colorHex: String?
+    let operation: String?
+
+    init(identifier: String,
+         center: [Float],
+         rotation: [Float],
+         dimensions: [Float]? = nil,
+         category: String? = nil,
+         colorHex: String? = nil,
+         operation: String? = nil) {
+        self.identifier = identifier
+        self.center = center
+        self.rotation = rotation
+        self.dimensions = dimensions
+        self.category = category
+        self.colorHex = colorHex
+        self.operation = operation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case identifier, center, rotation, dimensions, category, operation
+        case colorHex = "color_hex"
+    }
 }
 
 /// 3D 뷰 안에서 일어난 편집을 화면(SwiftUI) 쪽에서 꺼내올 수 있게 연결해주는 핸들.
@@ -893,9 +931,12 @@ final class FurnitureEditSession: ObservableObject {
     fileprivate var cancel: (() -> Void)?
     fileprivate var restoreVisibility: (() -> Void)?
     fileprivate var applyHiddenIdentifiers: ((Set<String>) -> Void)?
+    fileprivate var addMeasured: ((MeasuredFurnitureDraft) -> Bool)?
     func pendingEdits() -> [FurniturePoseEdit] { collect?() ?? [] }
     func cancelPendingEdits() { cancel?() }
     func restoreFurnitureVisibility() { restoreVisibility?() }
+    @discardableResult
+    func addMeasuredFurniture(_ draft: MeasuredFurnitureDraft) -> Bool { addMeasured?(draft) ?? false }
     func setHiddenFurnitureIdentifiers(_ identifiers: Set<String>) {
         applyHiddenIdentifiers?(identifiers)
     }
@@ -907,7 +948,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     var isTransparent: Bool = false         // 투명 모드: 반투명 벽 박스
     var allowsLocalFallback: Bool = true
     var onAssetFailure: ((String) -> Void)? = nil
-    var wallColor: UIColor = .white
+    var onSceneReady: (() -> Void)? = nil
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
     /// 사용자 본인의 AI 생성 가구(사진 기반)에는 적용하지 않음 — 실제 촬영 결과와 어긋나 보일 수 있어서.
@@ -967,6 +1009,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         editSession?.restoreVisibility = { [weak coord] in coord?.showAllFurniture() }
         editSession?.applyHiddenIdentifiers = { [weak coord] identifiers in
             coord?.setHiddenFurnitureIdentifiers(identifiers)
+        }
+        editSession?.addMeasured = { [weak coord] draft in
+            coord?.addMeasuredFurniture(draft) ?? false
         }
         coord.sceneTask = Task { @MainActor in
             await buildScene(into: roomAnchor, coordinator: coord)
@@ -1034,6 +1079,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         coordinator.entitiesByIdentifier.removeAll()
         coordinator.identifierByEntity.removeAll()
         coordinator.poseBaseline.removeAll()
+        coordinator.newFurnitureIdentifiers.removeAll()
         coordinator.arView = nil
     }
 
@@ -1046,7 +1092,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     @MainActor
     private func buildScene(into anchor: AnchorEntity, coordinator: Coordinator) async {
 
-        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.35 : 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(
+            isTransparent ? 0.58 : wallColor.cgColor.alpha
+        )
 
         // ── capturedRoom이 있으면 방 구조 먼저 렌더링 (JSON 결과 기다리지 않음) ──
         if let room = capturedRoom {
@@ -1284,11 +1332,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     center: worldPos,
                     yaw: Coordinator.serverYaw(of: placedEntity.orientation),
                     transform: placedEntity.transform,
-                    dimensions: collisionDimensions
+                    dimensions: collisionDimensions,
+                    isNew: false,
+                    colorHex: obj.colorHex,
+                    category: obj.category
                 )
                 // Preserve server coordinates on load. Wall clamping belongs to
                 // explicit user edits; independently pushing objects creates overlaps.
             }
+        }
+        guard !Task.isCancelled else { return }
+        if coordinator.poseBaseline.isEmpty {
+            onAssetFailure?("편집할 가구가 없어요. 운영자에게 이벤트 배치를 확인해 달라고 알려주세요.")
+        } else {
+            onSceneReady?()
         }
     }
 
@@ -1532,7 +1589,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     /// 카테고리별 색상 박스 (배경색과 겹치지 않는 뚜렷한 색상). furnitureTint 있으면 그걸로 통일.
     private func makeFallbackBox(for obj: RoomDataPayload.RoomObject) -> ModelEntity {
         var mat = SimpleMaterial()
-        mat.color = .init(tint: furnitureTint ?? colorForCategory(obj.category ?? ""))
+        let savedColor = obj.colorHex.flatMap(UIColor.voColor(hex:))
+        mat.color = .init(tint: furnitureTint ?? savedColor ?? colorForCategory(obj.category ?? ""))
         mat.roughness = 0.9
         let raw = obj.dimensions ?? []
         let dims = (0..<3).map { index -> Float in
@@ -1583,8 +1641,12 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let transform: Transform
             /// 서버가 전달한 RoomPlan OBB 치수. 렌더 모델의 숨은 여백과 무관한 충돌 기준이다.
             let dimensions: SIMD3<Float>
+            let isNew: Bool
+            let colorHex: String?
+            let category: String?
         }
         var poseBaseline: [String: PoseBaseline] = [:]
+        var newFurnitureIdentifiers: Set<String> = []
 
         /// 서버 JSON의 회전 표기(transform 첫 열이 [cos, 0, sin])에 맞춘 yaw 값
         static func serverYaw(of orientation: simd_quatf) -> Float {
@@ -1601,11 +1663,15 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let yaw = Self.serverYaw(of: entity.orientation)
                 let moved = length(SIMD2(center.x - base.center.x, center.z - base.center.z)) > 0.005
                 let turned = abs(atan2(sin(yaw - base.yaw), cos(yaw - base.yaw))) > 0.01
-                guard moved || turned else { continue }
+                guard moved || turned || base.isNew else { continue }
                 edits.append(FurniturePoseEdit(
                     identifier: identifier,
                     center: [center.x, base.center.y, center.z],
-                    rotation: [0, yaw, 0]
+                    rotation: [0, yaw, 0],
+                    dimensions: base.isNew ? [base.dimensions.x, base.dimensions.y, base.dimensions.z] : nil,
+                    category: base.isNew ? base.category : nil,
+                    colorHex: base.isNew ? base.colorHex : nil,
+                    operation: base.isNew ? "create" : nil
                 ))
             }
             return edits
@@ -1613,12 +1679,23 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         func resetFurnitureToBaseline() {
             deselect()
+            let addedIdentifiers = newFurnitureIdentifiers
             for (identifier, entity) in entitiesByIdentifier {
+                if addedIdentifiers.contains(identifier) {
+                    entity.removeFromParent()
+                    continue
+                }
                 if let baseline = poseBaseline[identifier] {
                     entity.transform = baseline.transform
                 }
                 entity.isEnabled = true
             }
+            for identifier in addedIdentifiers {
+                entitiesByIdentifier[identifier] = nil
+                poseBaseline[identifier] = nil
+            }
+            identifierByEntity = identifierByEntity.filter { !addedIdentifiers.contains($0.value) }
+            newFurnitureIdentifiers.removeAll()
         }
 
         func showAllFurniture() {
@@ -1629,6 +1706,95 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             for (identifier, entity) in entitiesByIdentifier {
                 entity.isEnabled = !hiddenIdentifiers.contains(identifier)
             }
+        }
+
+        /// 별도 LiDAR 측정 화면에서 얻은 치수로 새 OBB 가구를 방에 넣는다. 스캔한 실제 공간과
+        /// 저장된 방은 서로 다른 AR 좌표계이므로, 측정 화면의 위치는 쓰지 않고 방 안의 비어 있는
+        /// 지점을 찾아 배치한다. 이후 사용자가 기존 편집 방식으로 정확한 위치를 정한다.
+        func addMeasuredFurniture(_ draft: MeasuredFurnitureDraft) -> Bool {
+            guard let roomAnchor,
+                  draft.dimensions.x.isFinite, draft.dimensions.y.isFinite, draft.dimensions.z.isFinite,
+                  draft.dimensions.x > 0.02, draft.dimensions.y > 0.02, draft.dimensions.z > 0.02 else {
+                return false
+            }
+
+            deselect()
+            var material = SimpleMaterial()
+            material.color = .init(tint: UIColor.voColor(hex: draft.colorHex) ?? .systemBrown)
+            material.roughness = 0.88
+            let entity = ModelEntity(
+                mesh: .generateBox(size: draft.dimensions, cornerRadius: 0.035),
+                materials: [material]
+            )
+            entity.name = "furniture_\(draft.id)"
+            entity.generateCollisionShapes(recursive: true)
+            roomAnchor.addChild(entity)
+
+            let floorY = floorTransform?.columns.3.y ?? 0
+            let provisionalCenter = SIMD3<Float>(0, floorY + draft.dimensions.y / 2, 0)
+            entity.position = provisionalCenter
+            entitiesByIdentifier[draft.id] = entity
+            identifierByEntity[ObjectIdentifier(entity)] = draft.id
+            newFurnitureIdentifiers.insert(draft.id)
+            poseBaseline[draft.id] = PoseBaseline(
+                centerOffset: .zero,
+                center: provisionalCenter,
+                yaw: 0,
+                transform: entity.transform,
+                dimensions: draft.dimensions,
+                isNew: true,
+                colorHex: draft.colorHex,
+                category: "custom"
+            )
+
+            // 바닥 중앙부터 바깥쪽으로 탐색해 다른 가구와 겹치지 않는 첫 지점을 사용한다.
+            var candidates: [SIMD3<Float>] = []
+            if let floorTransform, let halfExtent = floorHalfExtent {
+                let usableX = max(0, halfExtent.x - draft.dimensions.x / 2 - 0.05)
+                let usableY = max(0, halfExtent.y - draft.dimensions.z / 2 - 0.05)
+                let step: Float = 0.35
+                var x = -usableX
+                while x <= usableX + 0.001 {
+                    var y = -usableY
+                    while y <= usableY + 0.001 {
+                        let point = floorTransform * SIMD4<Float>(x, y, 0, 1)
+                        candidates.append(SIMD3(point.x, floorY + draft.dimensions.y / 2, point.z))
+                        y += step
+                    }
+                    x += step
+                }
+                candidates.sort {
+                    let center = floorTransform.columns.3
+                    let lhs = SIMD2($0.x - center.x, $0.z - center.z)
+                    let rhs = SIMD2($1.x - center.x, $1.z - center.z)
+                    return length_squared(lhs) < length_squared(rhs)
+                }
+            } else {
+                candidates = [provisionalCenter]
+            }
+
+            var chosen = provisionalCenter
+            for candidate in candidates {
+                entity.position = candidate
+                clampEntityToWalls(entity)
+                if furnitureCollisionScore(for: entity) <= 0.0001 {
+                    chosen = entity.position(relativeTo: roomAnchor)
+                    break
+                }
+            }
+            entity.position = chosen
+            poseBaseline[draft.id] = PoseBaseline(
+                centerOffset: .zero,
+                center: chosen,
+                yaw: 0,
+                transform: entity.transform,
+                dimensions: draft.dimensions,
+                isNew: true,
+                colorHex: draft.colorHex,
+                category: "custom"
+            )
+            select(entity)
+            return true
         }
         /// 편집 모드에서 선택된 가구를 옮기는 오른쪽 핸들바 — 선택 여부에 따라 보이기/숨기기
         var nudgeHandle: FurnitureNudgeHandle?
@@ -2218,6 +2384,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
             return corners
         }
+    }
+}
+
+private extension UIColor {
+    static func voColor(hex: String) -> UIColor? {
+        var value = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6, let number = UInt64(value, radix: 16) else { return nil }
+        return UIColor(
+            red: CGFloat((number >> 16) & 0xFF) / 255,
+            green: CGFloat((number >> 8) & 0xFF) / 255,
+            blue: CGFloat(number & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 
