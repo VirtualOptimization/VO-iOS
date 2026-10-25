@@ -1354,19 +1354,22 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let items = payload.objects.compactMap { object -> FurnitureColorLegendItem? in
                 guard let entity = coordinator.entitiesByIdentifier[object.identifier] else { return nil }
                 let category = (object.category ?? "").lowercased()
+                let color = representativeColor(of: entity) ?? colorForCategory(category)
+                var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, opacity: CGFloat = 0
+                color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &opacity)
+                let isYellowStorage = (0.10...0.19).contains(hue) && saturation > 0.35 && brightness > 0.4
                 let title: String
                 switch category {
                 case "bed": title = "침대"
                 case "table": title = "책상·테이블"
                 case "chair": title = "의자"
                 case "sofa": title = "소파"
-                case "storage": title = "옷장·수납장"
+                case "storage": title = isYellowStorage ? "서랍장" : "옷장·수납장"
                 case "television": title = "TV"
                 case "refrigerator": title = "냉장고"
                 case "washerdryer": title = "세탁기"
                 default: title = "기타 가구"
                 }
-                let color = representativeColor(of: entity) ?? colorForCategory(category)
                 var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
                 color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
                 let key = "\(title)-\(Int(red * 255))-\(Int(green * 255))-\(Int(blue * 255))"
