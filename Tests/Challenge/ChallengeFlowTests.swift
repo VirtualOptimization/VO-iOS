@@ -139,7 +139,7 @@ final class MockChallengeAPI: ChallengeServing {
         precondition(missingDetails.improvements == ["가구 겹침·방 밖 배치로 총 10점 추가 감점됐어요."])
         let guidance = ChallengePlacementHint.sections.flatMap(\.items)
         precondition(guidance.contains { $0.contains("침대 머리") } && guidance.contains { $0.contains("문 앞") }
-                     && guidance.contains { $0.contains("80cm") } && !guidance.contains { $0.contains("0cm예요") })
+                     && guidance.contains { $0.contains("연결") } && !guidance.contains { $0.contains("cm") })
         print("PASS: server penalty rules decode; counted penalty feedback and legacy results; placement guide and grounded score review")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }

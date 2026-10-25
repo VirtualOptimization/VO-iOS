@@ -124,14 +124,19 @@ struct ChallengeRootView: View {
         .sheet(item: $activeSheet, onDismiss: sheetDismissed) { sheet in
             Group {
                 switch sheet {
-                case .hints: placementHints
+                case .hints:
+                    if #available(iOS 18.0, *) {
+                        placementHints.presentationSizing(.fitted)
+                    } else {
+                        placementHints
+                    }
                 case .submission: submissionConfirmation
                 case .newParticipant: newParticipantConfirmation
                 case .exit: exitConfirmation
                 case .error: errorNotice
                 }
             }
-            .presentationDetents(sheet == .hints ? [.large] : [.medium, .large])
+            .presentationDetents(sheet == .hints ? [.height(500)] : [.medium, .large])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(sheet == .error)
         }
@@ -644,8 +649,8 @@ struct ChallengeRootView: View {
                 .accessibilityLabel("힌트 닫기")
             }
             .padding(.horizontal, 24).padding(.top, 20)
-            centeredScroll {
-                VStack(alignment: .leading, spacing: 18) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("힌트를 보는 동안에도 시간은 계속 흘러요.")
                         .font(.regular11).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 8) {
@@ -667,9 +672,10 @@ struct ChallengeRootView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 24).padding(.bottom, 28)
+                .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
             }
         }
+        .frame(idealWidth: 600, idealHeight: 500)
         .foregroundStyle(.primary)
         .tint(Color.voBlue)
         .background(Color(.systemBackground))
