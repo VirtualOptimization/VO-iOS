@@ -172,8 +172,12 @@ final class ChallengeViewModel: ObservableObject {
         seconds = max(0, Int(Date().timeIntervalSince(startedAt)))
     }
 
+    var canSubmit: Bool {
+        !isWorking && participantToken != nil && (hasPendingSubmission || (room != nil && sceneReady))
+    }
+
     func submit(edits: [FurniturePoseEdit]) async {
-        guard !isWorking, let participantToken, hasPendingSubmission || (room != nil && sceneReady) else { return }
+        guard canSubmit, let participantToken else { return }
         isWorking = true
         defer { isWorking = false }
         screen = .submitting

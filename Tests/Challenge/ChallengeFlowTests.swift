@@ -43,13 +43,20 @@ final class MockChallengeAPI: ChallengeServing {
         await vm.start(name: "visitor", phone: "01012345678")
         precondition(saved?.eventId == 7 && vm.hasSession && vm.remainingAttempts == 2)
         await vm.loadRoom()
+        precondition(!vm.canSubmit, "button remains disabled before scene readiness")
         await vm.submit(edits: [])
         precondition(api.submitted.isEmpty, "submission blocked before scene readiness")
         vm.sceneLoaded()
+        precondition(vm.canSubmit, "loaded scene enables confirmation and submission")
+        vm.isWorking = true
+        precondition(!vm.canSubmit, "duplicate submission blocked while working")
+        vm.isWorking = false
         await vm.submit(edits: [])
         precondition(vm.hasPendingSubmission && saved?.pending != nil, "failed request is persisted")
         let savedPending = saved!
         let key = savedPending.pending!.key
+        vm.sceneReady = false
+        precondition(vm.canSubmit, "durable retry does not require the scene to load again")
         let edited = FurniturePoseEdit(identifier: "bed", center: [1,2,3], rotation: [0,0,0])
         await vm.submit(edits: [edited])
         precondition(api.submitted.count == 2 && api.submitted.allSatisfy { $0.0 == key && $0.2.isEmpty }, "retry reuses exact key and body")

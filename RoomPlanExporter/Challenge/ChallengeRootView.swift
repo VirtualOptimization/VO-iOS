@@ -8,13 +8,24 @@ struct ChallengeRootView: View {
     @State private var name = ""
     @State private var phone = ""
     @State private var consent = false
-    @State private var confirmSubmit = false
+    @State private var activeSheet: ChallengeSheet?
+    @State private var confirmedEdits: [FurniturePoseEdit]?
     @State private var confirmExit = false
     @State private var confirmNewParticipant = false
-    @State private var showPlacementHints = false
     @FocusState private var focusedField: EntryField?
 
     private enum EntryField: Hashable { case name, phone }
+    private enum ChallengeSheet: String, Identifiable {
+        case hints, submission
+        var id: String { rawValue }
+    }
+
+    private func sheetDismissed() {
+        guard let edits = confirmedEdits else { return }
+        confirmedEdits = nil
+        // Wait for the confirmation sheet to close before showing a result/error.
+        Task { await vm.submit(edits: edits) }
+    }
 
     private var validEntry: Bool {
         (1...12).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count)
@@ -83,10 +94,15 @@ struct ChallengeRootView: View {
             }
         }
         .task { await vm.loadEvent() }
-        .sheet(isPresented: $showPlacementHints) {
-            placementHints
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+        .sheet(item: $activeSheet, onDismiss: sheetDismissed) { sheet in
+            Group {
+                switch sheet {
+                case .hints: placementHints
+                case .submission: submissionConfirmation
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .alert("알림", isPresented: Binding(get: { vm.errorMessage != nil },
                                           set: { if !$0 { vm.errorMessage = nil } })) {
@@ -102,10 +118,6 @@ struct ChallengeRootView: View {
             }
             Button("취소", role: .cancel) {}
         } message: { Text("이 기기의 참가 정보가 삭제돼요. 이전 참가자는 같은 번호로 다시 등록할 수 없어요.") }
-        .confirmationDialog("이 배치로 제출할까요?", isPresented: $confirmSubmit) {
-            Button("제출하기") { Task { await vm.submit(edits: editSession.pendingEdits()) } }
-            Button("계속 편집", role: .cancel) {}
-        } message: { Text("제출 후에는 이번 도전의 배치를 수정할 수 없어요.") }
         .confirmationDialog("도전을 그만둘까요?", isPresented: $confirmExit) {
             Button("기준 안내로 돌아가기", role: .destructive) { vm.leaveGame() }
             Button("계속하기", role: .cancel) {}
@@ -142,7 +154,7 @@ struct ChallengeRootView: View {
                             .font(.semiBold13).monospacedDigit()
                             .frame(minWidth: 48)
                             .accessibilityLabel("경과 시간 \(vm.seconds)초")
-                        Button { showPlacementHints = true } label: {
+                        Button { activeSheet = .hints } label: {
                             Image(systemName: "key.fill")
                                 .font(.system(size: 18, weight: .medium))
                                 .frame(width: 44, height: 44)
@@ -211,7 +223,7 @@ struct ChallengeRootView: View {
             }
             .padding(.horizontal, 40)
             .padding(.bottom, 12)
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
@@ -362,9 +374,9 @@ struct ChallengeRootView: View {
                     Button("초기화") { editSession.cancelPendingEdits() }
                         .buttonStyle(VOOutlineButtonStyle()).disabled(vm.hasPendingSubmission || vm.isWorking)
                     Button(vm.isWorking ? "제출 중…" : (vm.hasPendingSubmission ? "제출 재시도" : "배치 제출")) {
-                        confirmSubmit = true
+                        activeSheet = .submission
                     }
-                    .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking || !vm.sceneReady)
+                    .buttonStyle(VOFilledButtonStyle()).disabled(!vm.canSubmit)
                 }
             }
             .padding(.horizontal, 24).padding(.vertical, 20)
@@ -372,12 +384,32 @@ struct ChallengeRootView: View {
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in vm.updateElapsed() }
     }
 
+    private var submissionConfirmation: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("이 배치로 제출할까요?").font(.semiBold20)
+            Text("제출 후에는 이번 도전의 배치를 수정할 수 없어요.")
+                .font(.regular13).foregroundStyle(.secondary).lineSpacing(4)
+            Spacer(minLength: 0)
+            Button("제출하기") {
+                confirmedEdits = editSession.pendingEdits()
+                activeSheet = nil
+            }
+            .buttonStyle(VOFilledButtonStyle())
+            .disabled(!vm.canSubmit)
+            Button("계속 편집") { activeSheet = nil }
+                .buttonStyle(VOOutlineButtonStyle())
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+    }
+
     private var placementHints: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("더 좋은 배치를 위한 힌트").font(.semiBold16)
                 Spacer()
-                Button { showPlacementHints = false } label: {
+                Button { activeSheet = nil } label: {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("힌트 닫기")
