@@ -700,7 +700,7 @@ struct ChallengeRootView: View {
                                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                                     Text("\(score.totalScore, specifier: "%.1f")")
                                         .font(.semiBold38)
-                                        .foregroundStyle(Color.primary)
+                                        .foregroundStyle(Color.voBlue)
                                     Text("/ \(score.maxScore, specifier: "%.0f")점")
                                         .font(.regular14).foregroundStyle(.secondary)
                                 }
@@ -739,13 +739,6 @@ struct ChallengeRootView: View {
                                         Text("세 항목 점수의 합계에서 추가 감점을 뺀 최종 점수예요. 최저 점수는 0점이에요.")
                                             .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
                                             .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                if let aiScore = score.aiScore {
-                                    HStack {
-                                        Label("AI 배치 총점", systemImage: "sparkles").font(.regular13)
-                                        Spacer()
-                                        Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14)
                                     }
                                 }
                             }
@@ -836,9 +829,6 @@ struct ChallengeRootView: View {
                     rankingRow(item)
                     Divider()
                 }
-                Text("참가자별 가장 높은 점수의 기록이 표시돼요.")
-                    .font(.regular11).foregroundStyle(.secondary)
-                    .padding(.top, 18).padding(.bottom, 24)
             }
             .padding(.horizontal, 32)
             .frame(maxWidth: 1080).frame(maxWidth: .infinity)
