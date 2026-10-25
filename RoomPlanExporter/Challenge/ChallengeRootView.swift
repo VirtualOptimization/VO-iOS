@@ -11,9 +11,17 @@ struct ChallengeRootView: View {
     @State private var activeSheet: ChallengeSheet?
     @State private var confirmedAction: ConfirmedAction?
     @State private var isWide = false
+    @State private var furnitureLegend: [FurnitureColorLegendItem] = []
+    @State private var hintSheetHeight: CGFloat = 460
     @FocusState private var focusedField: EntryField?
 
     private enum EntryField: Hashable { case name, phone }
+    private struct HintContentHeight: PreferenceKey {
+        static var defaultValue: CGFloat { 0 }
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
     private enum ChallengeSheet: String, Identifiable {
         case hints, submission, newParticipant, exit, error
         var id: String { rawValue }
@@ -136,7 +144,7 @@ struct ChallengeRootView: View {
                 case .error: errorNotice
                 }
             }
-            .presentationDetents(sheet == .hints ? [.height(500)] : [.medium, .large])
+            .presentationDetents(sheet == .hints ? [.height(hintSheetHeight)] : [.medium, .large])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(sheet == .error)
         }
@@ -496,6 +504,7 @@ struct ChallengeRootView: View {
                             vm.sceneReady = false
                         },
                         onSceneReady: { vm.sceneLoaded() },
+                        onColorLegendReady: { furnitureLegend = $0 },
                         editMode: !vm.hasPendingSubmission && !vm.isWorking, editSession: editSession
                     )
                     .id(room.detail.renderingID)
@@ -504,6 +513,23 @@ struct ChallengeRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+            .overlay(alignment: .topLeading) {
+                if vm.sceneReady, !furnitureLegend.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(furnitureLegend) { item in
+                            HStack(spacing: 7) {
+                                Circle().fill(Color(uiColor: item.color))
+                                    .frame(width: 12, height: 12)
+                                    .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 0.5))
+                                Text(item.title).font(.regular11)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(12).allowsHitTesting(false)
+                }
+            }
             centeredScroll {
                 VStack(spacing: 20) {
                     if isWide {
@@ -672,10 +698,18 @@ struct ChallengeRootView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
+                .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 12)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: HintContentHeight.self, value: geometry.size.height)
+                    }
+                }
             }
         }
-        .frame(idealWidth: 600, idealHeight: 500)
+        .onPreferenceChange(HintContentHeight.self) { height in
+            hintSheetHeight = min(600, max(260, ceil(height) + 64))
+        }
+        .frame(idealWidth: 600, idealHeight: hintSheetHeight)
         .foregroundStyle(.primary)
         .tint(Color.voBlue)
         .background(Color(.systemBackground))

@@ -942,6 +942,12 @@ final class FurnitureEditSession: ObservableObject {
     }
 }
 
+struct FurnitureColorLegendItem: Identifiable {
+    let id: String
+    let title: String
+    let color: UIColor
+}
+
 struct FurnitureRealityKitView: UIViewRepresentable {
     let detail: RoomVersionDetail
     var capturedRoom: CapturedRoom? = nil   // B안: 제공 시 로컬 USDZ로 방 shell 렌더링
@@ -949,6 +955,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     var allowsLocalFallback: Bool = true
     var onAssetFailure: ((String) -> Void)? = nil
     var onSceneReady: (() -> Void)? = nil
+    var onColorLegendReady: (([FurnitureColorLegendItem]) -> Void)? = nil
     var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
@@ -1342,11 +1349,61 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
         }
         guard !Task.isCancelled else { return }
+        if let onColorLegendReady {
+            var seen = Set<String>()
+            let items = payload.objects.compactMap { object -> FurnitureColorLegendItem? in
+                guard let entity = coordinator.entitiesByIdentifier[object.identifier] else { return nil }
+                let category = (object.category ?? "").lowercased()
+                let title: String
+                switch category {
+                case "bed": title = "침대"
+                case "table": title = "책상·테이블"
+                case "chair": title = "의자"
+                case "sofa": title = "소파"
+                case "storage": title = "옷장·수납장"
+                case "television": title = "TV"
+                case "refrigerator": title = "냉장고"
+                case "washerdryer": title = "세탁기"
+                default: title = "기타 가구"
+                }
+                let color = representativeColor(of: entity) ?? colorForCategory(category)
+                var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+                color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+                let key = "\(title)-\(Int(red * 255))-\(Int(green * 255))-\(Int(blue * 255))"
+                guard seen.insert(key).inserted else { return nil }
+                return FurnitureColorLegendItem(id: key, title: title, color: color)
+            }
+            onColorLegendReady(items)
+        }
         if coordinator.poseBaseline.isEmpty {
             onAssetFailure?("편집할 가구가 없어요. 운영자에게 이벤트 배치를 확인해 달라고 알려주세요.")
         } else {
             onSceneReady?()
         }
+    }
+
+    /// Prefer the colored body over white bedding or dark legs in multipart models.
+    private func representativeColor(of entity: Entity) -> UIColor? {
+        var candidates: [UIColor] = []
+        func collect(_ node: Entity) {
+            if let model = node as? ModelEntity {
+                for material in model.model?.materials ?? [] {
+                    if let simple = material as? SimpleMaterial, simple.color.texture == nil {
+                        candidates.append(simple.color.tint)
+                    } else if let pbr = material as? PhysicallyBasedMaterial, pbr.baseColor.texture == nil {
+                        candidates.append(pbr.baseColor.tint)
+                    }
+                }
+            }
+            for child in node.children { collect(child) }
+        }
+        func prominence(_ color: UIColor) -> CGFloat {
+            var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+            color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+            return alpha > 0.1 ? saturation * brightness : -1
+        }
+        collect(entity)
+        return candidates.max { prominence($0) < prominence($1) }
     }
 
     // MARK: - OBB 충돌 해소
