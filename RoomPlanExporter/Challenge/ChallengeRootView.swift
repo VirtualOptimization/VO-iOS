@@ -637,8 +637,14 @@ struct ChallengeRootView: View {
             Text("랭킹이 정해지는 순서").font(.semiBold14)
             Text("참가자별 가장 좋은 기록으로 비교해요.")
                 .font(.regular12).foregroundStyle(.secondary)
-            Text("1. 총점이 높은 순\n2. 여유 공간이 넓은 순\n3. 소요 시간이 짧은 순\n4. 먼저 제출한 순")
-                .font(.regular12).foregroundStyle(.secondary).lineSpacing(5)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. 총점이 높은 순")
+                Text("2. 여유 공간이 넓은 순")
+                Text("3. 소요 시간이 짧은 순")
+                Text("4. 먼저 제출한 순")
+            }
+            .font(.regular12).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
         .voGlassCard(cornerRadius: 16)
@@ -651,12 +657,10 @@ struct ChallengeRootView: View {
                 rule in
                 Text(rule).font(.regular12)
             }
-            Text("3cm를 넘는 겹침·돌출부터 감점해요.\n책상 아래 의자는 허용 범위만큼 제외해요.")
-                .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
             Text("최종 점수 = 항목 합계 − 감점 (최저 0점)")
-                .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                .font(.semiBold16).foregroundStyle(.primary).lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
         .voGlassCard(cornerRadius: 16)
