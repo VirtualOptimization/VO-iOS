@@ -767,9 +767,12 @@ struct ChallengeRootView: View {
                                         HStack {
                                             Text(criterion.title).font(.regular13)
                                             Spacer()
-                                            Text(
-                                                "\(breakdown[criterion.key] ?? 0, specifier: "%.1f") / \(criterion.maxScore, specifier: "%.0f")점"
-                                            )
+                                            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                                                Text("\(breakdown[criterion.key] ?? 0, specifier: "%.1f")")
+                                                    .foregroundStyle(Color.voBlue)
+                                                Text(" / \(criterion.maxScore, specifier: "%.0f")점")
+                                                    .foregroundStyle(.secondary)
+                                            }
                                             .font(.semiBold13).monospacedDigit()
                                         }
                                         .padding(.vertical, 14)
@@ -781,6 +784,7 @@ struct ChallengeRootView: View {
                                             Spacer()
                                             Text(penalty > 0 ? "−\(String(format: "%.0f", penalty))점" : "없음")
                                                 .font(.semiBold13).monospacedDigit()
+                                                .foregroundStyle(penalty > 0 ? Color.pink : Color.secondary)
                                         }
                                         .padding(.vertical, 14)
                                         Text("세 항목 점수의 합계에서 추가 감점을 뺀 최종 점수예요. 최저 점수는 0점이에요.")
