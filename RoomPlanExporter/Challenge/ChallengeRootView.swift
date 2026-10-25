@@ -316,11 +316,23 @@ struct ChallengeRootView: View {
         .padding(.vertical, compact ? 10 : 16)
     }
 
+    /// Center short landscape pages in the visible area; let long pages and keyboard layouts scroll.
+    private func centeredScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        let page = content()
+        return GeometryReader { geometry in
+            ScrollView(showsIndicators: false) {
+                page
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: isWide ? max(0, geometry.size.height) : 0, alignment: .center)
+            }
+        }
+    }
+
     private var entry: some View {
-        ScrollView(showsIndicators: false) {
+        centeredScroll {
             let layout =
                 isWide
-                ? AnyLayout(HStackLayout(alignment: .top, spacing: 56))
+                ? AnyLayout(HStackLayout(alignment: .center, spacing: 56))
                 : AnyLayout(VStackLayout(alignment: .leading, spacing: 28))
             layout {
                 VStack(alignment: .leading, spacing: 16) {
@@ -399,7 +411,7 @@ struct ChallengeRootView: View {
     }
 
     private var criteria: some View {
-        ScrollView(showsIndicators: false) {
+        centeredScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("가구를 옮기기 전에\n채점 기준을 확인해주세요")
@@ -407,7 +419,7 @@ struct ChallengeRootView: View {
                     Text("안전·동선 30점, 생활 원칙 30점, 여유 공간 40점.\n합계에서 추가 감점을 빼 최종 점수를 정해요.")
                         .font(.regular12).foregroundStyle(.secondary)
                 }
-                .padding(.top, 28)
+                .padding(.top, isWide ? 0 : 28)
                 LazyVGrid(
                     columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: isWide ? 2 : 1),
                     spacing: 20
@@ -465,7 +477,7 @@ struct ChallengeRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-            ScrollView(showsIndicators: false) {
+            centeredScroll {
                 VStack(spacing: 20) {
                     if isWide {
                         Text("나만의 배치를 완성해보세요").font(.semiBold16)
@@ -514,7 +526,7 @@ struct ChallengeRootView: View {
         _ title: String, message: String, @ViewBuilder actions: () -> Actions
     ) -> some View {
         VStack(spacing: 0) {
-            ScrollView {
+            centeredScroll {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(title).font(.semiBold20)
                     Text(message).font(.regular13).foregroundStyle(.secondary).lineSpacing(5)
@@ -596,7 +608,7 @@ struct ChallengeRootView: View {
                 .accessibilityLabel("힌트 닫기")
             }
             .padding(.horizontal, 24).padding(.top, 20)
-            ScrollView {
+            centeredScroll {
                 VStack(alignment: .leading, spacing: 24) {
                     Text("배치하면서 참고해보세요. 힌트를 보는 동안에도 도전 시간은 계속 흘러요.")
                         .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
@@ -632,12 +644,12 @@ struct ChallengeRootView: View {
     }
 
     private var result: some View {
-        ScrollView(showsIndicators: false) {
+        centeredScroll {
             VStack(spacing: 24) {
                 if let score = vm.result {
                     let layout =
                         isWide
-                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 32))
+                        ? AnyLayout(HStackLayout(alignment: .center, spacing: 32))
                         : AnyLayout(VStackLayout(spacing: 24))
                     layout {
                         VStack(spacing: 20) {
@@ -652,7 +664,7 @@ struct ChallengeRootView: View {
                                         .font(.regular14).foregroundStyle(.secondary)
                                 }
                             }
-                            .padding(.top, 32)
+                            .padding(.top, isWide ? 0 : 32)
                             HStack {
                                 resultMetric(
                                     "현재 순위", score.rank.map { "\($0)위 / \(score.totalRanked)명" } ?? "순위 없음")
@@ -707,7 +719,6 @@ struct ChallengeRootView: View {
                             Text("남은 도전 \(vm.remainingAttempts)회")
                                 .font(.regular12).foregroundStyle(.secondary)
                         }
-                        .padding(.top, isWide ? 32 : 0)
                         .frame(maxWidth: .infinity)
                     }
                 }
@@ -750,7 +761,7 @@ struct ChallengeRootView: View {
     }
 
     private var leaderboard: some View {
-        ScrollView(showsIndicators: false) {
+        centeredScroll {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("현재 랭킹").font(.semiBold20)
@@ -760,7 +771,7 @@ struct ChallengeRootView: View {
                             .font(.regular12).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, 30)
+                .padding(.top, isWide ? 0 : 30)
                 if let event = vm.event {
                     Text(event.name).font(.regular12).foregroundStyle(.secondary).padding(.top, 8)
                 }
