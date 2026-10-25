@@ -105,6 +105,14 @@ final class ChallengeViewModel: ObservableObject {
         if pendingSubmission == nil, startedAt == nil { startedAt = Date() }
     }
 
+    var canSwitchParticipant: Bool { !isWorking && !hasPendingSubmission }
+
+    func beginNewParticipant() {
+        guard canSwitchParticipant else { return }
+        forgetParticipant()
+        screen = .entry
+    }
+
     func forgetParticipant() {
         clearSaved()
         participantToken = nil
@@ -241,6 +249,7 @@ final class ChallengeViewModel: ObservableObject {
     func closeRanking() { screen = rankingReturnScreen }
 
     func leaveGame() {
+        guard !isWorking, !hasPendingSubmission else { return }
         room = nil
         seconds = 0
         startedAt = nil

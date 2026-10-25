@@ -53,6 +53,10 @@ final class MockChallengeAPI: ChallengeServing {
         vm.isWorking = false
         await vm.submit(edits: [])
         precondition(vm.hasPendingSubmission && saved?.pending != nil, "failed request is persisted")
+        precondition(!vm.canSwitchParticipant)
+        vm.beginNewParticipant()
+        vm.leaveGame()
+        precondition(vm.hasSession && vm.hasPendingSubmission && saved?.pending != nil, "pending submission survives participant/exit actions")
         let savedPending = saved!
         let key = savedPending.pending!.key
         vm.sceneReady = false
@@ -87,8 +91,14 @@ final class MockChallengeAPI: ChallengeServing {
         await resultRestore.loadEvent()
         await resultRestore.resume()
         precondition(resultRestore.screen == .result && resultRestore.submittedSeconds == 65)
-        resultRestore.forgetParticipant()
-        precondition(saved == nil && !resultRestore.hasSession && resultRestore.screen == .welcome)
+        resultRestore.isWorking = true
+        resultRestore.beginNewParticipant()
+        precondition(resultRestore.hasSession, "participant switch blocked during request")
+        resultRestore.isWorking = false
+        precondition(resultRestore.canSwitchParticipant)
+        resultRestore.beginNewParticipant()
+        precondition(saved == nil && !resultRestore.hasSession && resultRestore.screen == .entry,
+                     "new participant action clears local session and opens entry directly")
 
         // The submitted matrix keeps RoomPlan's column-vector convention.
         let object = ChallengeObjectEdit(pose: FurniturePoseEdit(identifier:"bed",center:[1,2,3],rotation:[0,.pi/2,0]))
