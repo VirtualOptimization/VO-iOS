@@ -451,6 +451,7 @@ struct ChallengeRootView: View {
                                         key: item.key, fallback: item.description)
                                 )
                                 .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                             .voGlassCard(cornerRadius: 16)
@@ -619,10 +620,12 @@ struct ChallengeRootView: View {
                 rule in
                 Text(rule).font(.regular12)
             }
-            Text("겹침과 방 밖 배치 감점은 각각 합산해요. 3cm를 넘는 겹침·돌출부터 계산하며, 자기 책상 아래의 의자는 허용 범위를 고려해요.")
+            Text("3cm를 넘는 겹침·돌출부터 감점해요.\n책상 아래 의자는 허용 범위만큼 제외해요.")
                 .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
-            Text("항목별 점수 합계 − 추가 감점 = 최종 점수\n최종 점수는 0점 아래로 내려가지 않아요.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text("최종 점수 = 항목 합계 − 감점 (최저 0점)")
                 .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
         .voGlassCard(cornerRadius: 16)

@@ -295,9 +295,9 @@ struct ChallengePlacementHint: Identifiable {
 
     static func criterionDescription(key: String, fallback: String) -> String {
         switch key {
-        case "safety": "문 앞 통행 공간 15점과 가구 사용 공간 15점을 합산해요. 필요한 공간을 확보한 비율에 따라 부분 점수를 받아요."
-        case "principles": "침대 머리와 문의 관계, 옷장·책상의 위치와 방향을 평가해요. 방에 있는 가구에 적용되는 원칙의 충족률로 계산해요."
-        case "space": "폭 약 80cm의 이동 공간을 확보할 수 있는 가장 큰 연결 공간을 AI 배치와 비교해요. AI 수준이면 40점이며, 더 넓어도 40점이 상한이에요."
+        case "safety": "문 앞 통행 공간 15점과 가구 사용 공간 15점을 합산해요.\n필요한 공간을 확보한 비율에 따라 부분 점수를 받아요."
+        case "principles": "침대 머리와 문의 관계, 옷장·책상의 위치와 방향을 평가해요.\n방에 있는 가구에 적용되는 원칙의 충족률로 계산해요."
+        case "space": "폭 약 80cm의 이동 공간을 확보할 수 있는 가장 큰 연결 공간을 AI 배치와 비교해요.\nAI 수준이면 40점이며, 더 넓어도 40점이 상한이에요."
         default: fallback
         }
     }
