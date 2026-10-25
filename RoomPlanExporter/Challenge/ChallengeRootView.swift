@@ -457,7 +457,11 @@ struct ChallengeRootView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    penaltyGuide.frame(maxWidth: .infinity)
+                    VStack(spacing: 20) {
+                        penaltyGuide
+                        rankingGuide
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 Text("배치 중에도 오른쪽 위 열쇠 버튼으로 기준을 다시 볼 수 있어요.")
                     .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
@@ -514,7 +518,7 @@ struct ChallengeRootView: View {
                     .font(.regular12).foregroundStyle(.secondary).lineSpacing(5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if isWide {
-                        Text("가구를 선택하면 이동·회전할 수 있어요. 오른쪽 위 열쇠에서 배점과 감점을 확인해보세요.")
+                        Text("가구를 선택하면 이동·회전할 수 있어요.\n오른쪽 위 열쇠에서 배점과 감점을 확인해보세요.")
                             .font(.regular12).foregroundStyle(.secondary).lineSpacing(5)
                     }
                     let controls =
@@ -594,6 +598,18 @@ struct ChallengeRootView: View {
                 .buttonStyle(VOFilledButtonStyle()).disabled(!vm.canSubmit)
             Button("계속 편집") { activeSheet = nil }.buttonStyle(VOOutlineButtonStyle())
         }
+    }
+
+    private var rankingGuide: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("랭킹이 정해지는 순서").font(.semiBold14)
+            Text("참가자별 가장 좋은 기록으로 비교해요.")
+                .font(.regular12).foregroundStyle(.secondary)
+            Text("1. 총점이 높은 순\n2. 여유 공간이 넓은 순\n3. 소요 시간이 짧은 순\n4. 먼저 제출한 순")
+                .font(.regular12).foregroundStyle(.secondary).lineSpacing(5)
+        }
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .voGlassCard(cornerRadius: 16)
     }
 
     private var penaltyGuide: some View {
