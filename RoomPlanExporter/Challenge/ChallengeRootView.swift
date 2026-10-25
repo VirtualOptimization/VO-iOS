@@ -416,37 +416,48 @@ struct ChallengeRootView: View {
         .opacity(validEntry && !vm.isWorking ? 1 : 0.45)
     }
 
+    private var orderedCriteria: [ChallengeCriterion] {
+        let order = ["safety", "space", "principles"]
+        return (vm.event?.criteria ?? []).sorted {
+            (order.firstIndex(of: $0.key) ?? order.count) < (order.firstIndex(of: $1.key) ?? order.count)
+        }
+    }
+
     private var criteria: some View {
         centeredScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("가구를 옮기기 전에\n채점 기준을 확인해주세요")
                         .font(.semiBold20).lineSpacing(4)
-                    Text("안전·동선 30점, 생활 원칙 30점, 여유 공간 40점.\n합계에서 추가 감점을 빼 최종 점수를 정해요.")
+                    Text("안전·동선 30점, 여유 공간 40점, 생활 원칙 30점.\n합계에서 추가 감점을 빼 최종 점수를 정해요.")
                         .font(.regular12).foregroundStyle(.secondary)
                 }
                 .padding(.top, isWide ? 0 : 28)
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: isWide ? 2 : 1),
-                    spacing: 20
-                ) {
-                    ForEach(vm.event?.criteria ?? []) { item in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(item.title).font(.semiBold16)
-                                Spacer()
-                                Text("\(item.maxScore, specifier: "%.0f")점").font(.semiBold14)
+                let layout =
+                    isWide
+                    ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+                    : AnyLayout(VStackLayout(spacing: 20))
+                layout {
+                    VStack(spacing: 20) {
+                        ForEach(orderedCriteria) { item in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text(item.title).font(.semiBold16)
+                                    Spacer()
+                                    Text("\(item.maxScore, specifier: "%.0f")점").font(.semiBold14)
+                                }
+                                Text(
+                                    ChallengePlacementHint.criterionDescription(
+                                        key: item.key, fallback: item.description)
+                                )
+                                .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
                             }
-                            Text(
-                                ChallengePlacementHint.criterionDescription(
-                                    key: item.key, fallback: item.description)
-                            ).font(.regular12)
-                                .foregroundStyle(.secondary).lineSpacing(4)
+                            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                            .voGlassCard(cornerRadius: 16)
                         }
-                        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                        .voGlassCard(cornerRadius: 16)
                     }
-                    penaltyGuide
+                    .frame(maxWidth: .infinity)
+                    penaltyGuide.frame(maxWidth: .infinity)
                 }
                 Text("배치 중에도 오른쪽 위 열쇠 버튼으로 기준을 다시 볼 수 있어요.")
                     .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
@@ -620,7 +631,8 @@ struct ChallengeRootView: View {
                         .font(.regular11).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("추가 감점").font(.semiBold14)
-                        ForEach(vm.event?.penaltyRules ?? ChallengePlacementHint.defaultPenaltyRules, id: \.self) { rule in
+                        ForEach(vm.event?.penaltyRules ?? ChallengePlacementHint.defaultPenaltyRules, id: \.self) {
+                            rule in
                             Text(rule).font(.regular12)
                         }
                     }
