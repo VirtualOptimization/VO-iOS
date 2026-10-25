@@ -201,16 +201,16 @@ struct ChallengeRootView: View {
                     .accessibilityLabel("V-O")
                 Text("내 손으로 바꾸는 공간")
                     .font(.semiBold20).padding(.top, compact ? 18 : 30)
-                Text("가구를 옮기고 점수를 확인해보세요.\n나만의 배치로 랭킹에 도전할 수 있어요.")
+                Text("움직이기 편한 공간을 만들어보세요.\n세 항목 점수에서 감점을 빼 순위를 정해요.")
                     .font(.regular13).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).lineSpacing(5)
                     .padding(.top, 10)
                 VStack(spacing: 0) {
                     welcomeStep("01", "참가자 정보 입력", "닉네임과 연락처를 입력해주세요", compact: compact)
                     Divider()
-                    welcomeStep("02", "가구 배치하기", "방 안의 가구를 자유롭게 옮겨보세요", compact: compact)
+                    welcomeStep("02", "가구 배치하기", "열쇠 버튼으로 배점·감점을 확인해보세요", compact: compact)
                     Divider()
-                    welcomeStep("03", "점수와 랭킹 확인", "AI 배치와 비교하고 순위를 확인해보세요", compact: compact)
+                    welcomeStep("03", "점수와 랭킹 확인", "항목별 점수와 감점을 함께 확인해보세요", compact: compact)
                 }
                 .padding(.top, compact ? 16 : 28)
                 Spacer(minLength: 12)
@@ -318,7 +318,7 @@ struct ChallengeRootView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("가구를 옮기기 전에\n채점 기준을 확인해주세요")
                         .font(.semiBold20).lineSpacing(4)
-                    Text("세 가지 기준으로 배치를 평가해요.")
+                    Text("안전·동선 30점, 생활 원칙 30점, 여유 공간 40점.\n합계에서 추가 감점을 빼 최종 점수를 정해요.")
                         .font(.regular12).foregroundStyle(.secondary)
                 }
                 .padding(.top, 28)
@@ -329,13 +329,15 @@ struct ChallengeRootView: View {
                             Spacer()
                             Text("\(item.maxScore, specifier: "%.0f")점").font(.semiBold14)
                         }
-                        Text(item.description).font(.regular12)
+                        Text(ChallengePlacementHint.criterionDescription(key: item.key, fallback: item.description)).font(.regular12)
                             .foregroundStyle(.secondary).lineSpacing(4)
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                     .voGlassCard(cornerRadius: 16)
                 }
-
+                penaltyGuide
+                Text("배치 중에도 오른쪽 위 열쇠 버튼으로 기준을 다시 볼 수 있어요.")
+                    .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
             }
             .padding(.horizontal, 24).padding(.bottom, 28)
         }
@@ -404,10 +406,25 @@ struct ChallengeRootView: View {
         .background(Color(.systemBackground))
     }
 
+    private var penaltyGuide: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("추가 감점은 이렇게 계산해요").font(.semiBold14)
+            ForEach(vm.event?.penaltyRules ?? ChallengePlacementHint.defaultPenaltyRules, id: \.self) { rule in
+                Text(rule).font(.regular12)
+            }
+            Text("겹침과 방 밖 배치 감점은 각각 합산해요. 3cm를 넘는 겹침·돌출부터 계산하며, 자기 책상 아래의 의자는 허용 범위를 고려해요.")
+                .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+            Text("항목별 점수 합계 − 추가 감점 = 최종 점수\n최종 점수는 0점 아래로 내려가지 않아요.")
+                .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+        }
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .voGlassCard(cornerRadius: 16)
+    }
+
     private var placementHints: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("더 좋은 배치를 위한 힌트").font(.semiBold16)
+                Text("배점·감점과 배치 힌트").font(.semiBold16)
                 Spacer()
                 Button { activeSheet = nil } label: {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
@@ -419,6 +436,7 @@ struct ChallengeRootView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Text("배치하면서 참고해보세요. 힌트를 보는 동안에도 도전 시간은 계속 흘러요.")
                         .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                    penaltyGuide
                     ForEach(ChallengePlacementHint.sections) { section in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(section.title).font(.semiBold14)
@@ -483,10 +501,22 @@ struct ChallengeRootView: View {
                                 .padding(.vertical, 14)
                                 Divider()
                             }
+                            if let penalty = score.placementPenalty {
+                                HStack {
+                                    Text("추가 감점").font(.regular13)
+                                    Spacer()
+                                    Text(penalty > 0 ? "−\(String(format: "%.0f", penalty))점" : "없음")
+                                        .font(.semiBold13).monospacedDigit()
+                                }
+                                .padding(.vertical, 14)
+                                Text("세 항목 점수의 합계에서 추가 감점을 뺀 최종 점수예요. 최저 점수는 0점이에요.")
+                                    .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                         if let aiScore = score.aiScore {
                             HStack {
-                                Label("AI 배치 점수", systemImage: "sparkles").font(.regular13)
+                                Label("AI 배치 총점", systemImage: "sparkles").font(.regular13)
                                 Spacer()
                                 Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14)
                             }
@@ -549,7 +579,7 @@ struct ChallengeRootView: View {
                 }
                 if let aiScore = vm.ranking?.aiScore {
                     HStack {
-                        Label("AI 배치 점수", systemImage: "sparkles").font(.regular13)
+                        Label("AI 배치 총점", systemImage: "sparkles").font(.regular13)
                         Spacer()
                         Text("\(aiScore, specifier: "%.1f")점").font(.semiBold14).monospacedDigit()
                     }

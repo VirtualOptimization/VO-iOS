@@ -111,11 +111,26 @@ final class MockChallengeAPI: ChallengeServing {
         precondition(score().strengths.isEmpty && score().improvements.isEmpty, "no fabricated feedback without scores")
         let dq = score(breakdown: ["safety": 30], disqualified: true, beatAI: true)
         precondition(dq.strengths.count == 2 && dq.improvements.isEmpty, "legacy flag does not force disqualification UI")
-        precondition(score(beatAI: true).strengths == ["AI 배치보다 넓은 사용 가능 공간을 확보했어요."])
+        precondition(score(beatAI: true).strengths == ["사용 가능한 여유 공간이 AI 배치보다 넓어요."])
+        let decoder = JSONDecoder()
+        let eventJSON = #"{"event_id":7,"name":"test","is_active":true,"max_attempts":1,"max_score":100,"criteria":[],"disqualify_rules":[],"penalty_rules":["겹친 가구 한 쌍마다 -5점","방 밖으로 나간 가구 하나마다 -5점"]}"#
+        let modernEvent = try decoder.decode(ChallengeEvent.self, from: Data(eventJSON.utf8))
+        precondition(modernEvent.penaltyRules == ChallengePlacementHint.defaultPenaltyRules)
+        let legacyEvent = try decoder.decode(ChallengeEvent.self, from: Data(#"{"event_id":7,"name":"test","is_active":true,"max_attempts":1,"max_score":100,"criteria":[],"disqualify_rules":[]}"#.utf8))
+        precondition(legacyEvent.penaltyRules == nil, "older events still decode")
+        let penalized = try decoder.decode(ChallengeScore.self, from: Data(#"{"attempt_id":8,"total_score":80,"max_score":100,"disqualified":false,"breakdown":{"safety":30,"door_clearance":15,"furniture_use":15,"principles":30,"space":40,"penalty":20},"hints":["가구 3쌍이 겹쳐 있어요 (-15점)","가구 1개가 방 밖으로 나가 있어요 (-5점)","침대 옆 공간이 0cm예요 (권장 65cm)"],"beat_ai":false,"ai_score":80,"rank":1,"total_ranked":1,"remaining_attempts":0}"#.utf8))
+        precondition(penalized.placementPenalty == 20 && penalized.totalScore == 80)
+        precondition(penalized.improvements == ["가구 3쌍이 겹쳐 15점 감점됐어요.", "가구 1개가 방 밖으로 나가 5점 감점됐어요."])
+        precondition(!penalized.strengths.contains { $0.contains("추가 감점이 없어요") })
+        precondition(score().placementPenalty == nil, "missing penalty is not interpreted as zero")
+        let noPenalty = score(breakdown: ["penalty": 0])
+        precondition(noPenalty.strengths == ["가구 겹침·방 밖 배치로 인한 추가 감점이 없어요."])
+        let missingDetails = score(breakdown: ["penalty": 10])
+        precondition(missingDetails.improvements == ["가구 겹침·방 밖 배치로 총 10점 추가 감점됐어요."])
         let guidance = ChallengePlacementHint.sections.flatMap(\.items)
-        precondition(guidance.count == 10 && guidance.contains { $0.contains("침대 머리") }
-                     && guidance.contains { $0.contains("문 앞") } && !guidance.contains { $0.contains("0cm예요") })
-        print("PASS: placement guide available before scoring; result feedback grounded in breakdown; legacy disqualification flag does not override score feedback")
+        precondition(guidance.contains { $0.contains("침대 머리") } && guidance.contains { $0.contains("문 앞") }
+                     && guidance.contains { $0.contains("80cm") } && !guidance.contains { $0.contains("0cm예요") })
+        print("PASS: server penalty rules decode; counted penalty feedback and legacy results; placement guide and grounded score review")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }
 }

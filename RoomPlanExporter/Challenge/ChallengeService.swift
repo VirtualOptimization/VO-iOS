@@ -8,10 +8,11 @@ struct ChallengeEvent: Decodable {
     let maxScore: Double
     let criteria: [ChallengeCriterion]
     let disqualifyRules: [String]
+    var penaltyRules: [String]? = nil
     enum CodingKeys: String, CodingKey {
         case eventId = "event_id", name, isActive = "is_active"
         case maxAttempts = "max_attempts", maxScore = "max_score"
-        case criteria, disqualifyRules = "disqualify_rules"
+        case criteria, disqualifyRules = "disqualify_rules", penaltyRules = "penalty_rules"
     }
 }
 
@@ -60,54 +61,87 @@ struct ChallengeScore: Codable {
     let totalRanked: Int
     let remainingAttempts: Int
 
+    /// Nil means an older result did not report the extra penalty.
+    var placementPenalty: Double? {
+        guard let value = breakdown?["penalty"], value.isFinite, value >= 0 else { return nil }
+        return value
+    }
+
     var strengths: [String] {
         var messages: [String] = []
-        if let safety = breakdown?["safety"], safety >= 24 {
-            messages.append(safety >= 30 ? "출입과 가구 사용 공간 항목에서 만점을 받았어요." : "출입과 가구 사용 공간 항목에서 좋은 점수를 받았어요.")
+        if let door = breakdown?["door_clearance"], door >= 12 {
+            messages.append(door >= 15 ? "문 앞 통행 공간 항목에서 15점 만점을 받았어요." : "문 앞 통행 공간 항목에서 좋은 점수를 받았어요.")
+        }
+        if let use = breakdown?["furniture_use"], use >= 12 {
+            messages.append(use >= 15 ? "가구 사용 공간 항목에서 15점 만점을 받았어요." : "가구 주변의 사용 공간 항목에서 좋은 점수를 받았어요.")
+        }
+        if breakdown?["door_clearance"] == nil, breakdown?["furniture_use"] == nil,
+           let safety = breakdown?["safety"], safety >= 24 {
+            messages.append(safety >= 30 ? "안전·동선 항목에서 30점 만점을 받았어요." : "안전·동선 항목에서 좋은 점수를 받았어요.")
         }
         if let principles = breakdown?["principles"], principles >= 24 {
-            messages.append(principles >= 30 ? "가구 배치 원칙을 잘 지켜 만점을 받았어요." : "가구의 위치와 방향이 배치 원칙에 잘 맞는 편이에요.")
+            messages.append(principles >= 30 ? "생활 원칙 항목에서 30점 만점을 받았어요." : "가구의 위치와 방향을 평가하는 생활 원칙 항목에서 좋은 점수를 받았어요.")
         }
         if beatAI {
-            messages.append("AI 배치보다 넓은 사용 가능 공간을 확보했어요.")
+            messages.append("사용 가능한 여유 공간이 AI 배치보다 넓어요.")
         } else if let space = breakdown?["space"], space >= 32 {
-            messages.append(space >= 40 ? "공간 활용 항목에서 만점을 받았어요." : "공간 활용 항목에서 좋은 점수를 받았어요.")
+            messages.append(space >= 40 ? "여유 공간 항목에서 40점 만점을 받았어요." : "이동하고 사용할 수 있는 여유 공간 항목에서 좋은 점수를 받았어요.")
+        }
+        if placementPenalty == 0 {
+            messages.append("가구 겹침·방 밖 배치로 인한 추가 감점이 없어요.")
         }
         return messages
     }
 
-    var improvements: [String] {
-        var messages: [String] = []
-        if hints.contains("가구끼리 겹쳐 있어요") {
-            messages.append("가구끼리 겹쳐 있는 부분이 있어 사용하기 불편할 수 있어요.")
+    private var placementFindings: [String] {
+        hints.compactMap { hint in
+            let overlap = hint.replacingOccurrences(
+                of: #"^가구 ([0-9]+)쌍이 겹쳐 있어요 \(-([0-9]+)점\)$"#,
+                with: "가구 $1쌍이 겹쳐 $2점 감점됐어요.", options: .regularExpression)
+            if overlap != hint { return overlap }
+            let outside = hint.replacingOccurrences(
+                of: #"^가구 ([0-9]+)개가 방 밖으로 나가 있어요 \(-([0-9]+)점\)$"#,
+                with: "가구 $1개가 방 밖으로 나가 $2점 감점됐어요.", options: .regularExpression)
+            if outside != hint { return outside }
+            // Older saved results have no count or penalty amount.
+            if hint == "가구끼리 겹쳐 있어요" { return "가구끼리 겹쳐 있는 부분이 있어 사용하기 불편할 수 있어요." }
+            if hint == "가구가 방 밖으로 나가 있어요" { return "가구 일부가 방 밖에 놓여 있어 배치가 아쉬워요." }
+            return nil
         }
-        if hints.contains("가구가 방 밖으로 나가 있어요") {
-            messages.append("가구 일부가 방 밖에 놓여 있어 배치가 아쉬워요.")
+    }
+
+    var improvements: [String] {
+        var messages = placementFindings
+        if let penalty = placementPenalty, penalty > 0, messages.isEmpty {
+            messages.append("가구 겹침·방 밖 배치로 총 \(String(format: "%.0f", penalty))점 추가 감점됐어요.")
         }
         if let safety = breakdown?["safety"], safety < 30 {
+            var safetyMessages: [String] = []
             if let door = breakdown?["door_clearance"], door < 15 {
-                messages.append("문 앞 통행 공간이 가구로 막힌 부분이 있어 아쉬워요.")
+                safetyMessages.append("문 앞이 가구로 막힌 부분이 있어 통행 공간 점수가 줄었어요.")
             }
             if let use = breakdown?["furniture_use"], use < 15 {
-                messages.append("가구를 사용하기 위한 주변 공간이 충분하지 않은 부분이 있어요.")
+                safetyMessages.append("침대 옆이나 책상·수납장 앞의 사용 공간이 부족한 부분이 있어요.")
             }
-            if messages.isEmpty { messages.append("출입과 가구 사용 공간 항목의 점수가 아쉬워요.") }
+            messages += safetyMessages.isEmpty ? ["안전·동선 항목에서 만점을 받지 못했어요."] : safetyMessages
         }
         if let principles = breakdown?["principles"], principles < 30 {
             let findings: [String: String] = [
-                "침대 머리를 벽에 붙여보세요": "침대 머리가 벽에서 떨어져 있어 배치 원칙 점수가 줄었어요.",
-                "침대 머리가 문 있는 벽에 있어요": "침대 머리가 문이 있는 벽에 놓인 점이 아쉬워요.",
-                "누웠을 때 문이 앞에 보이면 더 좋아요": "침대에서 문이 정면으로 보이지 않는 점이 아쉬워요.",
-                "옷장은 문 쪽 벽에 두면 좋아요": "옷장이 문 맞은편 벽에 놓인 점이 아쉬워요.",
-                "책상이 문 있는 벽을 등지고 있어요": "책상이 문이 있는 벽을 등지고 있는 점이 아쉬워요."
+                "침대 머리를 벽에 붙여보세요": "침대 머리가 벽에서 떨어져 있어 생활 원칙 점수가 줄었어요.",
+                "침대 머리가 문 있는 벽에 있어요": "침대 머리가 문이 있는 벽에 놓여 생활 원칙 점수가 줄었어요.",
+                "누웠을 때 문이 앞에 보이면 더 좋아요": "침대에서 문이 앞쪽에 있지 않아 생활 원칙 점수가 줄었어요.",
+                "옷장은 문 쪽 벽에 두면 좋아요": "옷장이 문 맞은편 벽에 놓여 생활 원칙 점수가 줄었어요.",
+                "책상이 문 있는 벽을 등지고 있어요": "책상이 문이 있는 벽을 등지고 있어 생활 원칙 점수가 줄었어요."
             ]
             let details = hints.compactMap { findings[$0] }
-            messages += details.isEmpty ? ["가구의 위치와 방향에서 배치 원칙에 맞지 않는 부분이 있어요."] : details
+            messages += details.isEmpty ? ["가구의 위치와 방향에서 생활 원칙을 충족하지 못한 부분이 있어요."] : details
         }
         if let space = breakdown?["space"], space < 40 {
-            messages.append("사용 가능한 빈 공간을 더 확보할 여지가 있어요.")
+            messages.append("넓게 연결된 여유 공간이 기준보다 작아 공간 점수가 줄었어요.")
         }
-        return messages
+        // One furniture type can produce the same finding more than once.
+        var seen = Set<String>()
+        return messages.filter { seen.insert($0).inserted }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -257,24 +291,36 @@ struct ChallengePlacementHint: Identifiable {
     let items: [String]
     var id: String { title }
 
+    static let defaultPenaltyRules = ["겹친 가구 한 쌍마다 -5점", "방 밖으로 나간 가구 하나마다 -5점"]
+
+    static func criterionDescription(key: String, fallback: String) -> String {
+        switch key {
+        case "safety": "문 앞 통행 공간 15점과 가구 사용 공간 15점을 합산해요. 필요한 공간을 확보한 비율에 따라 부분 점수를 받아요."
+        case "principles": "침대 머리와 문의 관계, 옷장·책상의 위치와 방향을 평가해요. 방에 있는 가구에 적용되는 원칙의 충족률로 계산해요."
+        case "space": "폭 약 80cm의 이동 공간을 확보할 수 있는 가장 큰 연결 공간을 AI 배치와 비교해요. AI 수준이면 40점이며, 더 넓어도 40점이 상한이에요."
+        default: fallback
+        }
+    }
+
     static let sections: [ChallengePlacementHint] = [
-        .init(title: "침대 위치와 방향", items: [
-            "침대 머리를 벽에 붙여보세요.",
-            "침대 머리는 문이 있는 벽을 피해 배치해보세요.",
-            "누웠을 때 문이 앞에 보이도록 방향을 잡아보세요."
+        .init(title: "안전·동선 · 30점", items: [
+            "문 앞 통행 공간 15점 + 가구 사용 공간 15점이에요. 문 앞이 가구로 막히거나 사용 공간이 부족하면 해당 항목의 점수가 줄어요.",
+            "침대는 긴 측면 중 한쪽에 65cm, 책상·테이블 앞은 75cm의 사용 공간을 확보해보세요.",
+            "옷장 앞은 90cm, 낮은 수납장 앞은 70cm가 기준이에요. 기준보다 좁으면 확보한 비율만큼 부분 점수를 받아요."
         ]),
-        .init(title: "옷장과 책상", items: [
-            "옷장은 문 맞은편 벽보다 문 쪽 벽에 배치해보세요.",
-            "책상은 문이 있는 벽을 등지지 않도록 배치해보세요."
+        .init(title: "생활 원칙 · 30점", items: [
+            "침대 머리는 벽 가까이에 두되, 문이 있는 벽은 피해보세요. 벽과 25cm 이내이면 벽에 붙은 것으로 판단해요.",
+            "침대에 누웠을 때 문이 앞쪽에 있으면 해당 원칙의 점수를 모두 받아요. 옆쪽은 절반, 뒤쪽은 점수를 받지 못해요.",
+            "옷장은 문 맞은편 벽을 피하고, 책상은 문이 있는 벽을 등지지 않도록 배치해보세요.",
+            "적용되는 원칙을 평균 내어 30점으로 환산해요. 침대는 3개, 옷장·책상은 각각 1개의 원칙을 평가해요."
         ]),
-        .init(title: "이동과 가구 사용 공간", items: [
-            "문 앞을 비워 출입할 수 있는 통로를 확보해주세요.",
-            "침대 옆은 한쪽이라도 65cm 정도 비워두면 좋아요.",
-            "책상·테이블 앞은 75cm, 옷장 앞은 90cm, 수납장 앞은 70cm 정도의 사용 공간을 확보해보세요."
+        .init(title: "여유 공간 · 40점", items: [
+            "작은 빈틈을 모두 더하지 않고, 폭 약 80cm의 이동 공간을 확보할 수 있는 가장 큰 연결 공간을 평가해요.",
+            "사용 가능한 여유 공간이 AI 배치의 절반이면 약 20점, 같거나 더 넓으면 40점이에요.",
+            "AI보다 넓은 공간을 만들었다는 표시는 공간 크기 비교 결과예요. 최종 순위는 감점까지 반영한 총점으로 정해져요."
         ]),
-        .init(title: "공간 활용", items: [
-            "가구 사이에 흩어진 빈 공간보다 실제로 이동하고 사용할 수 있는 공간을 확보해보세요.",
-            "가구끼리 겹치거나 방 밖으로 나가지 않도록 확인해주세요."
+        .init(title: "랭킹이 정해지는 순서", items: [
+            "참가자별 가장 좋은 제출을 기준으로 총점 → 여유 공간 크기 → 짧은 소요 시간 → 먼저 제출한 순서로 비교해요."
         ])
     ]
 }
