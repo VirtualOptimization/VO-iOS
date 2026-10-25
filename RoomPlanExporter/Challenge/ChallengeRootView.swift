@@ -771,7 +771,7 @@ struct ChallengeRootView: View {
                             .font(.regular12).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, isWide ? 0 : 30)
+                .padding(.top, 30)
                 if let event = vm.event {
                     Text(event.name).font(.regular12).foregroundStyle(.secondary).padding(.top, 8)
                 }
