@@ -19,6 +19,12 @@ struct ChallengeRootView: View {
         var id: String { rawValue }
     }
 
+    private enum ResultCardAlignment: AlignmentID {
+        static func defaultValue(in dimensions: ViewDimensions) -> CGFloat { dimensions[.top] }
+    }
+
+    private static var resultCardTop: VerticalAlignment { VerticalAlignment(ResultCardAlignment.self) }
+
     private enum ConfirmedAction {
         case submit([FurniturePoseEdit])
         case newParticipant, leaveGame, reloadEvent
@@ -649,7 +655,7 @@ struct ChallengeRootView: View {
                 if let score = vm.result {
                     let layout =
                         isWide
-                        ? AnyLayout(HStackLayout(alignment: .center, spacing: 32))
+                        ? AnyLayout(HStackLayout(alignment: Self.resultCardTop, spacing: 32))
                         : AnyLayout(VStackLayout(spacing: 24))
                     layout {
                         VStack(spacing: 20) {
@@ -672,6 +678,7 @@ struct ChallengeRootView: View {
                                 resultMetric("소요 시간", "\(vm.submittedSeconds / 60)분 \(vm.submittedSeconds % 60)초")
                             }
                             .padding(18).voGlassCard(cornerRadius: 16)
+                            .alignmentGuide(Self.resultCardTop) { dimensions in dimensions[.top] }
                             if let breakdown = score.breakdown {
                                 VStack(spacing: 0) {
                                     ForEach(vm.event?.criteria ?? []) { criterion in
@@ -716,10 +723,9 @@ struct ChallengeRootView: View {
                             if !score.improvements.isEmpty {
                                 resultFeedback("아쉬운 부분", messages: score.improvements)
                             }
-                            Text("남은 도전 \(vm.remainingAttempts)회")
-                                .font(.regular12).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
+                        .alignmentGuide(Self.resultCardTop) { dimensions in dimensions[.top] }
                     }
                 }
             }
@@ -727,18 +733,9 @@ struct ChallengeRootView: View {
             .frame(maxWidth: 1120).frame(maxWidth: .infinity)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            let layout =
-                isWide ? AnyLayout(HStackLayout(spacing: 16)) : AnyLayout(VStackLayout(spacing: 12))
-            layout {
-                if vm.remainingAttempts > 0, vm.event?.isActive == true {
-                    Button("다시 도전하기") { Task { await vm.loadRoom() } }
-                        .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
-                    Button("랭킹 보기") { Task { await vm.loadRanking() } }
-                        .buttonStyle(VOOutlineButtonStyle()).disabled(vm.isWorking)
-                } else {
-                    Button("랭킹 보기") { Task { await vm.loadRanking() } }
-                        .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
-                }
+            VStack(spacing: 12) {
+                Button("랭킹 보기") { Task { await vm.loadRanking() } }
+                    .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
                 Button {
                     restart()
                 } label: {
@@ -747,7 +744,7 @@ struct ChallengeRootView: View {
                 }
                 .buttonStyle(.plain).disabled(vm.isWorking)
             }
-            .frame(maxWidth: 1080).padding(.horizontal, 32).padding(.vertical, 16)
+            .frame(maxWidth: 440).padding(.horizontal, 32).padding(.vertical, 16)
             .frame(maxWidth: .infinity).background(Color(.systemBackground))
         }
     }
