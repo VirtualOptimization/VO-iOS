@@ -131,7 +131,7 @@ struct ChallengeRootView: View {
                 case .error: errorNotice
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents(sheet == .hints ? [.large] : [.medium, .large])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(sheet == .error)
         }
@@ -604,7 +604,7 @@ struct ChallengeRootView: View {
     private var placementHints: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("배점·감점과 배치 힌트").font(.semiBold16)
+                Text("배치 힌트").font(.semiBold16)
                 Spacer()
                 Button {
                     activeSheet = nil
@@ -615,16 +615,23 @@ struct ChallengeRootView: View {
             }
             .padding(.horizontal, 24).padding(.top, 20)
             centeredScroll {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("배치하면서 참고해보세요. 힌트를 보는 동안에도 도전 시간은 계속 흘러요.")
-                        .font(.regular12).foregroundStyle(.secondary).lineSpacing(4)
-                    penaltyGuide
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("힌트를 보는 동안에도 시간은 계속 흘러요.")
+                        .font(.regular11).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("추가 감점").font(.semiBold14)
+                        ForEach(vm.event?.penaltyRules ?? ChallengePlacementHint.defaultPenaltyRules, id: \.self) { rule in
+                            Text(rule).font(.regular12)
+                        }
+                    }
+                    .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    .voGlassCard(cornerRadius: 16)
                     ForEach(ChallengePlacementHint.sections) { section in
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text(section.title).font(.semiBold14)
                             ForEach(section.items, id: \.self) { hint in
                                 Text(hint).font(.regular12).foregroundStyle(.secondary)
-                                    .lineSpacing(4).frame(maxWidth: .infinity, alignment: .leading)
+                                    .lineSpacing(3).frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
