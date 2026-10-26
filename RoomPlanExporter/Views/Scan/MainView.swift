@@ -14,15 +14,6 @@ struct MainView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 24)
 
-                    Button { showChallenge = true } label: {
-                        Label("가구 배치 챌린지 · 랭킹 도전", systemImage: "trophy.fill")
-                            .font(.semiBold16)
-                            .frame(maxWidth: .infinity).padding(18)
-                            .foregroundStyle(Color.voBlue)
-                            .voGlassCardFillingParent(cornerRadius: 16)
-                    }
-                    .buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 12)
-
                     mySpaceSection
                         .padding(.top, 32)
                 }
@@ -44,10 +35,14 @@ struct MainView: View {
 
     private var header: some View {
         VStack(spacing: 0) {
-            // 점 세 개 메뉴 → 탭하면 로그아웃이 바로 아래에 드롭다운으로 뜸
+            // 더보기 메뉴
             HStack {
                 Spacer()
                 Menu {
+                    Button { showChallenge = true } label: {
+                        Label("가구 배치 챌린지 · 랭킹 도전", systemImage: "trophy.fill")
+                    }
+                    Divider()
                     Button("로그아웃", role: .destructive) { authVM.logout() }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -55,7 +50,9 @@ struct MainView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
+                .accessibilityLabel("더보기")
             }
             .padding(.top, 2)
 
