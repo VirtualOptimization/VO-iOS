@@ -3,6 +3,7 @@ import SwiftUI
 struct MainView: View {
     @ObservedObject var vm: ScanViewModel
     @ObservedObject var authVM: AuthViewModel
+    @State private var showChallenge = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +21,9 @@ struct MainView: View {
             }
         }
         .onAppear { vm.syncRoomsWithServer() }
+        .fullScreenCover(isPresented: $showChallenge) {
+            ChallengeRootView(onClose: { showChallenge = false })
+        }
         .alert("불러오기 실패", isPresented: .constant(vm.inquiryError != nil), actions: {
             Button("확인") { vm.inquiryError = nil }
         }, message: {
@@ -31,10 +35,14 @@ struct MainView: View {
 
     private var header: some View {
         VStack(spacing: 0) {
-            // 점 세 개 메뉴 → 탭하면 로그아웃이 바로 아래에 드롭다운으로 뜸
+            // 더보기 메뉴
             HStack {
                 Spacer()
                 Menu {
+                    Button { showChallenge = true } label: {
+                        Label("가구 배치 챌린지 · 랭킹 도전", systemImage: "trophy.fill")
+                    }
+                    Divider()
                     Button("로그아웃", role: .destructive) { authVM.logout() }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -42,7 +50,9 @@ struct MainView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
+                .accessibilityLabel("더보기")
             }
             .padding(.top, 2)
 

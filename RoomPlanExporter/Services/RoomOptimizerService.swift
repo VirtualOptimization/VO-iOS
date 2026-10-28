@@ -296,6 +296,7 @@ struct RoomDataPayload: Decodable {
                                       // glb_url은 RealityKit이 못 읽어서(noImporter) 반드시 usdz를 써야 함.
         let center:        [Float]?  // 구 포맷에만 존재
         let dimensions:    [Float]?
+        let colorHex:      String?   // LiDAR로 직접 추가한 OBB의 사용자 선택 색상
         let transform:     [[Float]]
 
         init(from decoder: Decoder) throws {
@@ -312,6 +313,8 @@ struct RoomDataPayload: Decodable {
             usdzUrl       = try? c.decode(String.self, forKey: .usdzUrl)
             center        = try? c.decode([Float].self, forKey: .center)
             dimensions    = try? c.decode([Float].self, forKey: .dimensions)
+            colorHex      = (try? c.decode(String.self, forKey: .colorHex))
+                ?? (try? c.decode(String.self, forKey: .displayColor))
 
             // 구: [[Float]] 4x4 행렬 / 신: {rotation:[x,y,z](deg), translation:[x,y,z]}
             if let matrix = try? c.decode([[Float]].self, forKey: .transform) {
@@ -352,6 +355,8 @@ struct RoomDataPayload: Decodable {
             case usdcUrl = "usdc_url"
             case usdzUrl = "usdz_url"
             case center, dimensions, transform
+            case colorHex = "color_hex"
+            case displayColor = "display_color"
         }
 
         var simdTransform: simd_float4x4? {
