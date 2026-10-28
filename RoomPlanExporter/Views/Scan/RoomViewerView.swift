@@ -163,7 +163,7 @@ final class RoomGuideOverlay: UIView {
     var floorY: (() -> Float)?
     private var displayLink: CADisplayLink?
     private var labels: [String: UILabel] = [:]
-    private let rulerWidth: CGFloat = 26
+    private let rulerWidth: CGFloat = 20
     private var lastCameraPosition = SIMD3<Float>(repeating: .nan)
     private var lastCameraRotation = SIMD4<Float>(repeating: .nan)
     private var lastRoomPosition = SIMD3<Float>(repeating: .nan)
@@ -214,8 +214,8 @@ final class RoomGuideOverlay: UIView {
         for item in current.sorted(by: { $0.selected && !$1.selected }) {
             let label = labels[item.id] ?? {
                 let label = UILabel()
-                label.font = .systemFont(ofSize: 11, weight: .semibold)
-                label.layer.cornerRadius = 6
+                label.font = .systemFont(ofSize: 10, weight: .medium)
+                label.layer.cornerRadius = 4
                 label.clipsToBounds = true
                 label.textAlignment = .center
                 addSubview(label)
@@ -229,12 +229,12 @@ final class RoomGuideOverlay: UIView {
             }
             label.text = "  \(item.title)\(item.selected ? item.sizeText.map { " · " + $0 } ?? "" : "")  "
             label.textColor = item.selected ? .black : .label
-            label.backgroundColor = item.selected ? (UIColor(named: "voBlue") ?? .systemBlue) : UIColor.systemBackground.withAlphaComponent(0.9)
+            label.backgroundColor = item.selected ? (UIColor(named: "voBlue") ?? .systemBlue) : UIColor.systemBackground.withAlphaComponent(0.72)
             label.sizeToFit()
             var frame = CGRect(x: max(rulerWidth + 4, min(point.x - label.bounds.width / 2, bounds.width - label.bounds.width - 4)),
-                               y: max(rulerWidth + 6, point.y - 24), width: label.bounds.width, height: 22)
+                               y: max(rulerWidth + 6, point.y - 20), width: label.bounds.width, height: 18)
             for _ in 0..<3 where occupied.contains(where: { $0.intersects(frame.insetBy(dx: -2, dy: -2)) }) {
-                frame.origin.y = max(rulerWidth + 6, frame.origin.y - 24)
+                frame.origin.y = max(rulerWidth + 6, frame.origin.y - 20)
             }
             label.frame = frame
             label.isHidden = false
@@ -265,12 +265,12 @@ final class RoomGuideOverlay: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        UIColor.systemBackground.withAlphaComponent(0.94).setFill()
+        UIColor(red: 0.96, green: 0.94, blue: 0.90, alpha: 0.8).setFill()
         context.fill(CGRect(x: 0, y: 0, width: bounds.width, height: rulerWidth))
         context.fill(CGRect(x: 0, y: 0, width: rulerWidth, height: bounds.height))
         drawRuler(horizontal: true, context: context)
         drawRuler(horizontal: false, context: context)
-        ("cm" as NSString).draw(at: CGPoint(x: 3, y: 6), withAttributes: [.font: UIFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: UIColor.secondaryLabel])
+        ("cm" as NSString).draw(at: CGPoint(x: 2, y: 4), withAttributes: [.font: UIFont.systemFont(ofSize: 8, weight: .medium), .foregroundColor: UIColor.secondaryLabel])
     }
 
     private func drawRuler(horizontal: Bool, context: CGContext) {
@@ -306,14 +306,14 @@ final class RoomGuideOverlay: UIView {
             let fraction = (target - coordinates[segment]) / (coordinates[segment + 1] - coordinates[segment])
             let position = samples[segment].0 + CGFloat(fraction) * (samples[segment + 1].0 - samples[segment].0)
             let major = index % 5 == 0
-            let length: CGFloat = major ? 10 : 4
+            let length: CGFloat = major ? 7 : 3
             context.move(to: horizontal ? CGPoint(x: position, y: rulerWidth) : CGPoint(x: rulerWidth, y: position))
             context.addLine(to: horizontal ? CGPoint(x: position, y: rulerWidth - length) : CGPoint(x: rulerWidth - length, y: position))
             context.strokePath()
             if major, abs(position - lastLabel) > 35 {
                 let value = String(format: "%.0f", target * 100)
                 let attributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium), .foregroundColor: UIColor.label
+                    .font: UIFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular), .foregroundColor: UIColor.label
                 ]
                 if !horizontal, position - (value as NSString).size(withAttributes: attributes).width < rulerWidth + 4 { continue }
                 if horizontal {
@@ -1208,38 +1208,30 @@ final class FurnitureNudgeHandle: UIView {
         layer.cornerRadius = 28
         layer.borderWidth = 1
         layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
-        if showsAngleLabels {
-            backgroundColor = UIColor.systemBackground.withAlphaComponent(0.96)
-            layer.cornerRadius = 20
-            layer.borderColor = UIColor.separator.withAlphaComponent(0.25).cgColor
-            layer.shadowColor = UIColor.black.cgColor
-            layer.shadowOpacity = 0.12
-            layer.shadowRadius = 12
-            layer.shadowOffset = CGSize(width: 0, height: 4)
-        }
+
 
         configureRotateButton(rotateLeftButton, symbol: "rotate.left", label: "왼쪽으로 90도 회전")
         configureRotateButton(rotateRightButton, symbol: "rotate.right", label: "오른쪽으로 90도 회전")
         rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
         rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
 
-        instructionLabel.text = showsAngleLabels ? "가구 회전\n끌어서 이동" : "선택됨 · 끌어서 이동"
-        instructionLabel.numberOfLines = showsAngleLabels ? 2 : 1
-        instructionLabel.textColor = showsAngleLabels ? .label : .white
-        instructionLabel.font = .systemFont(ofSize: showsAngleLabels ? 12 : 14, weight: .semibold)
+        instructionLabel.text = showsAngleLabels ? "끌어서 이동 · 90°" : "선택됨 · 끌어서 이동"
+        instructionLabel.numberOfLines = 1
+        instructionLabel.textColor = .white
+        instructionLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         instructionLabel.textAlignment = .center
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
 
         [rotateLeftButton, instructionLabel, rotateRightButton].forEach(addSubview)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: showsAngleLabels ? 272 : 248),
-            heightAnchor.constraint(equalToConstant: showsAngleLabels ? 72 : 56),
+            widthAnchor.constraint(equalToConstant: 248),
+            heightAnchor.constraint(equalToConstant: 56),
 
             rotateLeftButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             rotateLeftButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rotateLeftButton.widthAnchor.constraint(equalToConstant: showsAngleLabels ? 64 : 44),
-            rotateLeftButton.heightAnchor.constraint(equalToConstant: showsAngleLabels ? 56 : 44),
+            rotateLeftButton.widthAnchor.constraint(equalToConstant: 44),
+            rotateLeftButton.heightAnchor.constraint(equalToConstant: 44),
 
             instructionLabel.leadingAnchor.constraint(equalTo: rotateLeftButton.trailingAnchor, constant: 8),
             instructionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -1247,8 +1239,8 @@ final class FurnitureNudgeHandle: UIView {
             rotateRightButton.leadingAnchor.constraint(equalTo: instructionLabel.trailingAnchor, constant: 8),
             rotateRightButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             rotateRightButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rotateRightButton.widthAnchor.constraint(equalToConstant: showsAngleLabels ? 64 : 44),
-            rotateRightButton.heightAnchor.constraint(equalToConstant: showsAngleLabels ? 56 : 44),
+            rotateRightButton.widthAnchor.constraint(equalToConstant: 44),
+            rotateRightButton.heightAnchor.constraint(equalToConstant: 44),
         ])
     }
 
@@ -1264,26 +1256,8 @@ final class FurnitureNudgeHandle: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = label
         if showsAngleLabels {
-            button.setImage(nil, for: .normal)
-            var configuration = UIButton.Configuration.tinted()
-            configuration.image = UIImage(systemName: symbol == "rotate.left" ? "arrow.counterclockwise" : "arrow.clockwise",
-                                          withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))
-            configuration.title = "90°"
-            configuration.imagePlacement = .top
-            configuration.imagePadding = 3
-            configuration.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8)
-            configuration.baseForegroundColor = .label
-            configuration.baseBackgroundColor = UIColor(named: "voBlue") ?? .systemBlue
-            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-                var attributes = attributes
-                attributes.font = .systemFont(ofSize: 12, weight: .semibold)
-                return attributes
-            }
-            button.tintColor = .label
-            configuration.cornerStyle = .medium
-            button.configuration = configuration
-            button.backgroundColor = .clear
-            button.layer.cornerRadius = 12
+            button.setImage(UIImage(systemName: symbol == "rotate.left" ? "arrow.counterclockwise" : "arrow.clockwise",
+                                    withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         }
     }
 
