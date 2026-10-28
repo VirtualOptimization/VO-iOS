@@ -82,7 +82,7 @@ private struct ServerOriginalPreview: View {
                 // 일부 가구 모델을 못 불러와도 OBB 박스로 대체돼서 화면은 정상 표시되므로,
                 // 사용자에게 굳이 오류를 보여주지 않고 콘솔 로그로만 남긴다.
                 FurnitureRealityKitView(detail: detail, isTransparent: true, allowsLocalFallback: false,
-                                        onAssetFailure: { print("⚠️ 가구 모델 로드 실패: \($0)") })
+                                        onAssetFailure: { print("⚠️ 가구 모델 로드 실패: \($0)") }, showsRoomGuides: true)
                     .id("\(detail.renderingID)-\(retry)")
             } else if let error {
                 VStack(spacing: 12) {

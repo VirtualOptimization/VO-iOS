@@ -165,7 +165,7 @@ struct InquiryResultView: View {
                                 Text("가구를 탭한 뒤 손가락으로 끌어서 이동하세요")
                                 Text("두 손가락 드래그와 확대·축소로 시점을 조절하세요")
                                 Text("아래 버튼은 선택한 가구를 90도 회전해요")
-                                Text("다 옮겼으면 오른쪽 위 저장을 눌러주세요")
+                                Text("다 옮겼으면 아래 저장을 눌러주세요")
                             }
                             .font(.regular11)
                             .foregroundStyle(.black)
@@ -436,6 +436,7 @@ struct InquiryResultView: View {
             }
         case .loaded(let versionDetail):
             FurnitureRealityKitView(detail: versionDetail, isTransparent: true,
+                                    showsRoomGuides: true,
                                     editMode: mode == .edit,
                                     hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [],
                                     editSession: editSession)

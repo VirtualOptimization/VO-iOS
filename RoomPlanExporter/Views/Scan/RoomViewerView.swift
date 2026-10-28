@@ -9,6 +9,327 @@
 import SwiftUI
 import RealityKit
 import RoomPlan
+import Combine
+import CryptoKit
+
+// MARK: - General V-O asset reuse
+
+actor FurnitureAssetFiles {
+    static let shared = FurnitureAssetFiles()
+    private var inFlight: [String: Task<URL, Error>] = [:]
+    private let session: URLSession
+    private let directory: URL
+    private var cleaned = false
+
+    init(session: URLSession = .shared, directory: URL? = nil) {
+        self.session = session
+        self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("VOFurnitureAssets", isDirectory: true)
+    }
+
+    /// Signed S3 URLs change on each visit; the object path and optional version ID identify the asset.
+    nonisolated static func cacheKey(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
+        if (parts.host ?? "").contains(".s3.") || (parts.host ?? "").contains(".s3-") {
+            parts.queryItems = parts.queryItems?.filter { $0.name == "versionId" }
+            if parts.queryItems?.isEmpty == true { parts.query = nil }
+        }
+        parts.fragment = nil
+        return parts.string ?? url.absoluteString
+    }
+
+    func file(for url: URL, fileExtension: String) async throws -> URL {
+        if !cleaned {
+            cleaned = true
+            let files = (try? FileManager.default.contentsOfDirectory(at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for file in files {
+                if let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                   Date().timeIntervalSince(date) >= 86_400 {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        }
+        let key = Self.cacheKey(url) + "." + fileExtension
+        if let pending = inFlight[key] { return try await pending.value }
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        let destination = directory.appendingPathComponent(digest).appendingPathExtension(fileExtension)
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path),
+           let date = attributes[.modificationDate] as? Date,
+           let size = attributes[.size] as? NSNumber, size.intValue > 0,
+           Date().timeIntervalSince(date) < 86_400 {
+            return destination
+        }
+        let session = session
+        let directory = directory
+        let download = Task<URL, Error> {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30
+            let (temporary, response) = try await session.download(for: request)
+            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            return destination
+        }
+        inFlight[key] = download
+        defer { inFlight[key] = nil }
+        return try await download.value
+    }
+
+    func invalidate(_ url: URL, fileExtension: String) {
+        let key = Self.cacheKey(url) + "." + fileExtension
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(digest).appendingPathExtension(fileExtension))
+    }
+
+    func prefetch(_ urls: [URL]) async {
+        var seen = Set<String>()
+        var iterator = urls.filter { seen.insert(Self.cacheKey($0)).inserted }.makeIterator()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 {
+                guard let url = iterator.next() else { break }
+                group.addTask { _ = try? await self.file(for: url, fileExtension: "usdz") }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, let url = iterator.next() else { group.cancelAll(); break }
+                group.addTask { _ = try? await self.file(for: url, fileExtension: "usdz") }
+            }
+        }
+    }
+}
+
+@MainActor
+private final class FurnitureModelTemplates {
+    static let shared = FurnitureModelTemplates()
+    private let models = NSCache<NSString, Entity>()
+    private var pending: [String: Task<Entity, Error>] = [:]
+
+    init() { models.countLimit = 24 }
+
+    func load(_ url: URL, fileExtension: String) async throws -> Entity {
+        let key = FurnitureAssetFiles.cacheKey(url) + "." + fileExtension
+        if let cached = models.object(forKey: key as NSString) { return cached.clone(recursive: true) }
+        if let pending = pending[key] { return try await pending.value.clone(recursive: true) }
+        let task = Task<Entity, Error> { @MainActor in
+            let file = try await FurnitureAssetFiles.shared.file(for: url, fileExtension: fileExtension)
+            do {
+                for try await model in Entity.loadAsync(contentsOf: file).values { return model }
+            } catch {
+                await FurnitureAssetFiles.shared.invalidate(url, fileExtension: fileExtension)
+                throw error
+            }
+            throw URLError(.cannotDecodeContentData)
+        }
+        pending[key] = task
+        defer { pending[key] = nil }
+        let model = try await task.value
+        models.setObject(model, forKey: key as NSString)
+        return model.clone(recursive: true)
+    }
+
+    func loadLocal(_ url: URL) async throws -> Entity {
+        let key = "local:" + url.path
+        if let model = models.object(forKey: key as NSString) { return model.clone(recursive: true) }
+        if let task = pending[key] { return try await task.value.clone(recursive: true) }
+        let task = Task<Entity, Error> { @MainActor in
+            for try await model in Entity.loadAsync(contentsOf: url).values { return model }
+            throw URLError(.cannotDecodeContentData)
+        }
+        pending[key] = task
+        defer { pending[key] = nil }
+        let model = try await task.value
+        models.setObject(model, forKey: key as NSString)
+        return model.clone(recursive: true)
+    }
+}
+
+// MARK: - Furniture names and floor-calibrated centimetre rulers
+
+struct RoomGuideItem {
+    let id: String
+    let title: String
+    let worldPoint: SIMD3<Float>
+    let selected: Bool
+    var sizeText: String? = nil
+}
+
+final class RoomGuideOverlay: UIView {
+    weak var arView: ARView?
+    weak var roomAnchor: AnchorEntity?
+    var items: (() -> [RoomGuideItem])?
+    var floorY: (() -> Float)?
+    private var displayLink: CADisplayLink?
+    private var labels: [String: UILabel] = [:]
+    private let rulerWidth: CGFloat = 26
+    private var lastCameraPosition = SIMD3<Float>(repeating: .nan)
+    private var lastCameraRotation = SIMD4<Float>(repeating: .nan)
+    private var lastRoomPosition = SIMD3<Float>(repeating: .nan)
+    private var lastSize = CGSize.zero
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = .clear
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        stop()
+        if window != nil {
+            let link = CADisplayLink(target: self, selector: #selector(refresh))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 20, preferred: 15)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+    }
+    func stop() { displayLink?.invalidate(); displayLink = nil }
+
+    static func furnitureName(category: String, height: Float) -> String {
+        switch category.lowercased() {
+        case "bed": return "침대"
+        case "table", "desk": return "책상·테이블"
+        case "chair": return "의자"
+        case "sofa": return "소파"
+        case "storage": return height >= 1.2 ? "옷장·수납장" : "서랍장·수납장"
+        case "television": return "TV"
+        case "refrigerator": return "냉장고"
+        case "washerdryer": return "세탁기"
+        case "custom": return "추가 가구"
+        default: return "가구"
+        }
+    }
+
+    @objc private func refresh() {
+        guard let arView, bounds.width > 0 else { return }
+        let current = (items?() ?? []).sorted { $0.id < $1.id }
+        let identifiers = Set(current.map(\.id))
+        for id in Set(labels.keys).subtracting(identifiers) { labels.removeValue(forKey: id)?.removeFromSuperview() }
+        var occupied: [CGRect] = []
+        for item in current.sorted(by: { $0.selected && !$1.selected }) {
+            let label = labels[item.id] ?? {
+                let label = UILabel()
+                label.font = .systemFont(ofSize: 11, weight: .semibold)
+                label.layer.cornerRadius = 6
+                label.clipsToBounds = true
+                label.textAlignment = .center
+                addSubview(label)
+                labels[item.id] = label
+                return label
+            }()
+            guard let point = arView.project(item.worldPoint), point.x.isFinite, point.y.isFinite,
+                  point.x >= rulerWidth, point.x < bounds.width, point.y >= rulerWidth, point.y < bounds.height else {
+                label.isHidden = true
+                continue
+            }
+            label.text = "  \(item.title)\(item.selected ? item.sizeText.map { " · " + $0 } ?? "" : "")  "
+            label.textColor = item.selected ? .black : .label
+            label.backgroundColor = item.selected ? (UIColor(named: "voBlue") ?? .systemBlue) : UIColor.systemBackground.withAlphaComponent(0.9)
+            label.sizeToFit()
+            var frame = CGRect(x: max(rulerWidth + 4, min(point.x - label.bounds.width / 2, bounds.width - label.bounds.width - 4)),
+                               y: max(rulerWidth + 6, point.y - 24), width: label.bounds.width, height: 22)
+            for _ in 0..<3 where occupied.contains(where: { $0.intersects(frame.insetBy(dx: -2, dy: -2)) }) {
+                frame.origin.y = max(rulerWidth + 6, frame.origin.y - 24)
+            }
+            label.frame = frame
+            label.isHidden = false
+            occupied.append(frame)
+        }
+        let camera = arView.cameraTransform
+        let roomPosition = roomAnchor?.position(relativeTo: nil) ?? .zero
+        if lastCameraPosition != camera.translation || lastCameraRotation != camera.rotation.vector
+            || lastRoomPosition != roomPosition || lastSize != bounds.size {
+            lastCameraPosition = camera.translation
+            lastCameraRotation = camera.rotation.vector
+            lastRoomPosition = roomPosition
+            lastSize = bounds.size
+            setNeedsDisplay()
+        }
+    }
+
+    /// Intersect each screen ray with the actual room floor. No assumed pixels-to-centimetres ratio.
+    private func floorPoint(at point: CGPoint) -> SIMD3<Float>? {
+        guard let arView, let roomAnchor, let ray = arView.ray(through: point) else { return nil }
+        let origin = roomAnchor.convert(position: ray.origin, from: nil)
+        let direction = roomAnchor.convert(direction: ray.direction, from: nil)
+        guard abs(direction.y) > 0.0001 else { return nil }
+        let distance = ((floorY?() ?? 0) - origin.y) / direction.y
+        guard distance > 0, distance < 100 else { return nil }
+        return origin + direction * distance
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        UIColor.systemBackground.withAlphaComponent(0.94).setFill()
+        context.fill(CGRect(x: 0, y: 0, width: bounds.width, height: rulerWidth))
+        context.fill(CGRect(x: 0, y: 0, width: rulerWidth, height: bounds.height))
+        drawRuler(horizontal: true, context: context)
+        drawRuler(horizontal: false, context: context)
+        ("cm" as NSString).draw(at: CGPoint(x: 3, y: 6), withAttributes: [.font: UIFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: UIColor.secondaryLabel])
+    }
+
+    private func drawRuler(horizontal: Bool, context: CGContext) {
+        let end = horizontal ? bounds.width : bounds.height
+        guard end > 60 else { return }
+        let samples: [(CGFloat, SIMD3<Float>)] = stride(from: Double(rulerWidth + 10), through: Double(end - 8), by: 12).compactMap {
+            let value = CGFloat($0)
+            return floorPoint(at: horizontal ? CGPoint(x: value, y: rulerWidth) : CGPoint(x: rulerWidth, y: value)).map { (value, $0) }
+        }
+        guard let first = samples.first, let last = samples.last, samples.count > 1 else { return }
+        let axis = abs(last.1.x - first.1.x) >= abs(last.1.z - first.1.z) ? 0 : 2
+        let coordinates = samples.map { Double($0.1[axis]) }
+        guard let low = coordinates.min(), let high = coordinates.max(), high - low > 0.01 else { return }
+        let steps: [Double] = [0.1, 0.2, 0.5, 1, 2, 5, 10]
+        let step = steps.first { (high - low) / $0 < 80 } ?? 10
+        let start = Int(ceil(low / step)), finish = Int(floor(high / step))
+        guard finish >= start, finish - start < 200 else { return }
+        context.setStrokeColor(UIColor.secondaryLabel.cgColor)
+        context.setLineWidth(0.7)
+        var lastLabel: CGFloat = -.greatestFiniteMagnitude
+        for index in start...finish {
+            let target = Double(index) * step
+            var matchingSegment: Int?
+            for candidate in 0..<(samples.count - 1) {
+                let a = coordinates[candidate]
+                let b = coordinates[candidate + 1]
+                if target >= min(a, b), target <= max(a, b), abs(b - a) > 0.0001 {
+                    matchingSegment = candidate
+                    break
+                }
+            }
+            guard let segment = matchingSegment else { continue }
+            let fraction = (target - coordinates[segment]) / (coordinates[segment + 1] - coordinates[segment])
+            let position = samples[segment].0 + CGFloat(fraction) * (samples[segment + 1].0 - samples[segment].0)
+            let major = index % 5 == 0
+            let length: CGFloat = major ? 10 : 4
+            context.move(to: horizontal ? CGPoint(x: position, y: rulerWidth) : CGPoint(x: rulerWidth, y: position))
+            context.addLine(to: horizontal ? CGPoint(x: position, y: rulerWidth - length) : CGPoint(x: rulerWidth - length, y: position))
+            context.strokePath()
+            if major, abs(position - lastLabel) > 35 {
+                let value = String(format: "%.0f", target * 100)
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium), .foregroundColor: UIColor.label
+                ]
+                if !horizontal, position - (value as NSString).size(withAttributes: attributes).width < rulerWidth + 4 { continue }
+                if horizontal {
+                    (value as NSString).draw(at: CGPoint(x: position + 2, y: 2), withAttributes: attributes)
+                } else {
+                    context.saveGState()
+                    context.translateBy(x: 2, y: position - 2)
+                    context.rotate(by: -.pi / 2)
+                    (value as NSString).draw(at: .zero, withAttributes: attributes)
+                    context.restoreGState()
+                }
+                lastLabel = position
+            }
+        }
+    }
+}
 
 /// LiDAR로 인식한 벽의 공통 표시색.
 /// #17233D를 반투명으로 사용해 흰색 벽 대신 모든 공간 화면에서 동일하게 보이게 한다.
@@ -239,8 +560,31 @@ struct RealityKitRoomView: UIViewRepresentable {
         context.coordinator.roomAnchor = roomAnchor
         context.coordinator.arView = arView
 
+        let overlay = RoomGuideOverlay()
+        overlay.arView = arView
+        overlay.roomAnchor = roomAnchor
+        let coord = context.coordinator
+        overlay.items = { [weak coord, weak roomAnchor] in
+            guard let coord, let roomAnchor else { return [] }
+            return coord.guideObjects.map { item in
+                RoomGuideItem(id: item.id, title: item.title,
+                    worldPoint: roomAnchor.convert(position: item.worldPoint, to: nil), selected: false)
+            }
+        }
+        overlay.floorY = { capturedRoom.floors.first?.transform.columns.3.y ?? 0 }
+        overlay.frame = arView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        arView.addSubview(overlay)
+        coord.guideOverlay = overlay
+        coord.guideObjects = capturedRoom.objects.map { object in
+            let center = object.transform.columns.3.xyz
+            return RoomGuideItem(id: object.identifier.uuidString,
+                title: RoomGuideOverlay.furnitureName(category: String(describing: object.category), height: object.dimensions.y),
+                worldPoint: center + SIMD3(0, object.dimensions.y / 2 + 0.06, 0), selected: false)
+        }
+
         if isTransparent || useCatalogRenderer {
-            Task { @MainActor in
+            coord.sceneTask = Task { @MainActor in
                 let opts = capturedRoom.objects.map { obj in
                     OptimizedObject(
                         identifier: obj.identifier,
@@ -252,7 +596,7 @@ struct RealityKitRoomView: UIViewRepresentable {
                 await loadOptimizedScene(capturedRoom, objects: opts, into: roomAnchor)
             }
         } else if let url = usdzURL {
-            Task { await loadUSDZ(url: url, into: roomAnchor) }
+            coord.sceneTask = Task { await loadUSDZ(url: url, into: roomAnchor) }
         } else {
             renderScene(capturedRoom, in: roomAnchor)
         }
@@ -267,11 +611,22 @@ struct RealityKitRoomView: UIViewRepresentable {
               !context.coordinator.hasAppliedOptimization else { return }
 
         context.coordinator.hasAppliedOptimization = true
-
-        Task { @MainActor in
+        context.coordinator.sceneTask?.cancel()
+        context.coordinator.guideObjects = optimizedObjects.compactMap { object in
+            guard let original = capturedRoom.objects.first(where: { $0.identifier == object.identifier }) else { return nil }
+            return RoomGuideItem(id: object.identifier.uuidString,
+                title: RoomGuideOverlay.furnitureName(category: object.category, height: original.dimensions.y),
+                worldPoint: object.center + SIMD3(0, original.dimensions.y / 2 + 0.06, 0), selected: false)
+        }
+        context.coordinator.sceneTask = Task { @MainActor in
             roomAnchor.children.removeAll()
             await loadOptimizedScene(capturedRoom, objects: optimizedObjects, into: roomAnchor)
         }
+    }
+
+    static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
+        coordinator.sceneTask?.cancel()
+        coordinator.guideOverlay?.stop()
     }
 
     // MARK: - USDZ 로드
@@ -279,7 +634,9 @@ struct RealityKitRoomView: UIViewRepresentable {
     @MainActor
     private func loadUSDZ(url: URL, into anchor: AnchorEntity) async {
         do {
+            // This generated room file reuses its path for different scans; do not cache it by URL.
             let entity = try Entity.loadSync(contentsOf: url)
+            guard !Task.isCancelled else { return }
             anchor.addChild(entity)
             // Apple USDZ의 바닥 재질을 선택된 바닥 색으로 덮기
             for s in capturedRoom.floors {
@@ -302,8 +659,12 @@ struct RealityKitRoomView: UIViewRepresentable {
         renderSurfaces(room, in: anchor)
 
         let mp = try? CapturedRoom.ModelProvider.load()
+        let remoteModels = serverModels.map { Array($0.values) } ?? []
+        let prefetch = Task { await FurnitureAssetFiles.shared.prefetch(remoteModels) }
+        defer { prefetch.cancel() }
 
         for opt in objects {
+            guard !Task.isCancelled else { return }
             guard let original = room.objects.first(where: { $0.identifier == opt.identifier }) else { continue }
 
             var placed = false
@@ -312,7 +673,13 @@ struct RealityKitRoomView: UIViewRepresentable {
                 ?? (serverModels == nil ? (try? mp?.modelFileURL(for: original)) : nil)
             if let modelURL {
                 do {
-                    let model = try Entity.loadSync(contentsOf: modelURL)
+                    let model: Entity
+                    if modelURL.isFileURL {
+                        model = try await FurnitureModelTemplates.shared.loadLocal(modelURL)
+                    } else {
+                        model = try await FurnitureModelTemplates.shared.load(modelURL, fileExtension: "usdz")
+                    }
+                    guard !Task.isCancelled else { return }
 
                     // 모델 크기를 원본 dimensions에 맞게 스케일 조정
                     let bounds = model.visualBounds(relativeTo: model)
@@ -452,6 +819,9 @@ struct RealityKitRoomView: UIViewRepresentable {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
         var hasAppliedOptimization: Bool = false
+        var sceneTask: Task<Void, Never>?
+        var guideOverlay: RoomGuideOverlay?
+        var guideObjects: [RoomGuideItem] = []
         let orbitCamera = RoomOrbitCamera()
         private var lastRotation: Float = 0
 
@@ -820,42 +1190,56 @@ struct UsdzRealityKitView: UIViewRepresentable {
 // 선택하면 아래에는 시야를 가리지 않는 작은 회전 액션 바만 나타난다.
 
 final class FurnitureNudgeHandle: UIView {
-    /// 양수면 시계 방향, 음수면 반시계 방향 회전.
+    /// 방의 Y축을 기준으로 한 회전 각도(라디안).
     var onRotate: ((Float) -> Void)?
 
     private let rotateLeftButton = UIButton(type: .system)
     private let instructionLabel = UILabel()
     private let rotateRightButton = UIButton(type: .system)
 
-    override init(frame: CGRect) {
+    private let showsAngleLabels: Bool
+
+    init(showsAngleLabels: Bool = false) {
+        self.showsAngleLabels = showsAngleLabels
+        let frame = CGRect.zero
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = UIColor.black.withAlphaComponent(0.40)
         layer.cornerRadius = 28
         layer.borderWidth = 1
         layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
+        if showsAngleLabels {
+            backgroundColor = UIColor.systemBackground.withAlphaComponent(0.96)
+            layer.cornerRadius = 20
+            layer.borderColor = UIColor.separator.withAlphaComponent(0.25).cgColor
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOpacity = 0.12
+            layer.shadowRadius = 12
+            layer.shadowOffset = CGSize(width: 0, height: 4)
+        }
 
         configureRotateButton(rotateLeftButton, symbol: "rotate.left", label: "왼쪽으로 90도 회전")
         configureRotateButton(rotateRightButton, symbol: "rotate.right", label: "오른쪽으로 90도 회전")
         rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
         rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
 
-        instructionLabel.text = "선택됨 · 끌어서 이동"
-        instructionLabel.textColor = .white
-        instructionLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        instructionLabel.text = showsAngleLabels ? "가구 회전\n끌어서 이동" : "선택됨 · 끌어서 이동"
+        instructionLabel.numberOfLines = showsAngleLabels ? 2 : 1
+        instructionLabel.textColor = showsAngleLabels ? .label : .white
+        instructionLabel.font = .systemFont(ofSize: showsAngleLabels ? 12 : 14, weight: .semibold)
         instructionLabel.textAlignment = .center
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
 
         [rotateLeftButton, instructionLabel, rotateRightButton].forEach(addSubview)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 248),
-            heightAnchor.constraint(equalToConstant: 56),
+            widthAnchor.constraint(equalToConstant: showsAngleLabels ? 272 : 248),
+            heightAnchor.constraint(equalToConstant: showsAngleLabels ? 72 : 56),
 
             rotateLeftButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             rotateLeftButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rotateLeftButton.widthAnchor.constraint(equalToConstant: 44),
-            rotateLeftButton.heightAnchor.constraint(equalToConstant: 44),
+            rotateLeftButton.widthAnchor.constraint(equalToConstant: showsAngleLabels ? 64 : 44),
+            rotateLeftButton.heightAnchor.constraint(equalToConstant: showsAngleLabels ? 56 : 44),
 
             instructionLabel.leadingAnchor.constraint(equalTo: rotateLeftButton.trailingAnchor, constant: 8),
             instructionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -863,8 +1247,8 @@ final class FurnitureNudgeHandle: UIView {
             rotateRightButton.leadingAnchor.constraint(equalTo: instructionLabel.trailingAnchor, constant: 8),
             rotateRightButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             rotateRightButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rotateRightButton.widthAnchor.constraint(equalToConstant: 44),
-            rotateRightButton.heightAnchor.constraint(equalToConstant: 44),
+            rotateRightButton.widthAnchor.constraint(equalToConstant: showsAngleLabels ? 64 : 44),
+            rotateRightButton.heightAnchor.constraint(equalToConstant: showsAngleLabels ? 56 : 44),
         ])
     }
 
@@ -879,10 +1263,32 @@ final class FurnitureNudgeHandle: UIView {
         button.layer.cornerRadius = 22
         button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = label
+        if showsAngleLabels {
+            button.setImage(nil, for: .normal)
+            var configuration = UIButton.Configuration.tinted()
+            configuration.image = UIImage(systemName: symbol == "rotate.left" ? "arrow.counterclockwise" : "arrow.clockwise",
+                                          withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))
+            configuration.title = "90°"
+            configuration.imagePlacement = .top
+            configuration.imagePadding = 3
+            configuration.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8)
+            configuration.baseForegroundColor = .label
+            configuration.baseBackgroundColor = UIColor(named: "voBlue") ?? .systemBlue
+            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+                var attributes = attributes
+                attributes.font = .systemFont(ofSize: 12, weight: .semibold)
+                return attributes
+            }
+            button.tintColor = .label
+            configuration.cornerStyle = .medium
+            button.configuration = configuration
+            button.backgroundColor = .clear
+            button.layer.cornerRadius = 12
+        }
     }
 
-    @objc private func rotateLeftTapped()  { onRotate?(-.pi / 2) }
-    @objc private func rotateRightTapped() { onRotate?(.pi / 2) }
+    @objc private func rotateLeftTapped()  { onRotate?(showsAngleLabels ? .pi / 2 : -.pi / 2) }
+    @objc private func rotateRightTapped() { onRotate?(showsAngleLabels ? -.pi / 2 : .pi / 2) }
 }
 
 // MARK: - FurnitureRealityKitView (rooms API 버전 상세 기반 3D 뷰어)
@@ -956,6 +1362,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     var onAssetFailure: ((String) -> Void)? = nil
     var onSceneReady: (() -> Void)? = nil
     var onColorLegendReady: (([FurnitureColorLegendItem]) -> Void)? = nil
+    /// General V-O viewer only. Challenge keeps its existing presentation and loading path.
+    var showsRoomGuides: Bool = false
     var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
@@ -1055,7 +1463,18 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         arView.addGestureRecognizer(tapGesture)
 
         // 가구 편집 도구 — 방과 가구를 가리지 않도록 선택됐을 때 화면 아래 중앙에 나타난다.
-        let handle = FurnitureNudgeHandle()
+        if showsRoomGuides {
+            let overlay = RoomGuideOverlay()
+            overlay.arView = arView
+            overlay.roomAnchor = roomAnchor
+            overlay.items = { [weak coord] in coord?.guideItems() ?? [] }
+            overlay.floorY = { [weak coord] in coord?.floorTransform?.columns.3.y ?? 0 }
+            overlay.frame = arView.bounds
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            arView.addSubview(overlay)
+            coord.guideOverlay = overlay
+        }
+        let handle = FurnitureNudgeHandle(showsAngleLabels: showsRoomGuides)
         handle.isHidden = true
         arView.addSubview(handle)
         NSLayoutConstraint.activate([
@@ -1082,6 +1501,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
         coordinator.sceneTask?.cancel()
+        coordinator.guideOverlay?.stop()
         coordinator.deselect()
         coordinator.entitiesByIdentifier.removeAll()
         coordinator.identifierByEntity.removeAll()
@@ -1132,10 +1552,6 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         let payload: RoomDataPayload
         do {
             let (jsonData, _) = try await URLSession.shared.data(from: dataURL)
-            if let raw = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let firstObj = (raw["objects"] as? [[String: Any]])?.first {
-                print("🔍 objects[0] 전체: \(firstObj)")
-            }
             payload = try JSONDecoder().decode(RoomDataPayload.self, from: jsonData)
             print("✅ JSON 파싱 완료: 오브젝트 \(payload.objects.count)개")
         } catch {
@@ -1144,36 +1560,6 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             return
         }
 
-        // 🔧 디버그: capturedRoom 없이(JSON만으로) 그리는 경로에서 벽/가구 위치가 실제로
-        // 어떻게 어긋나는지 확인하기 위한 임시 로그. 문제 재현되면 이 로그로 벽 좌표 대비
-        // 가구 좌표가 room 밖/다른 벽 쪽에 있는지 바로 확인 가능.
-        if capturedRoom == nil {
-            print("🪵 [디버그] dataURL = \(dataURLString)")
-            for (i, wall) in (payload.walls ?? []).enumerated() {
-                if let t = wall.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] wall[\(i)] center=(\(c.x), \(c.y), \(c.z)) dims=\(wall.dimensions)")
-                } else {
-                    print("🪵 [디버그] wall[\(i)] simdTransform 디코딩 실패, dims=\(wall.dimensions)")
-                }
-            }
-            for floor in payload.floors ?? [] {
-                if let t = floor.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] floor center=(\(c.x), \(c.y), \(c.z)) dims=\(floor.dimensions)")
-                }
-            }
-            for obj in payload.objects {
-                if let t = obj.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] object id=\(obj.identifier) cat=\(obj.category ?? "?") transform.center=(\(c.x), \(c.y), \(c.z)) json.center=\(obj.center ?? [])")
-                }
-            }
-        }
-
-        // 배치 클램프 기준 벽 목록 — editMode가 나중에 켜질 수도 있으니 항상 미리 준비해둔다.
-        // 바닥 사각형 근사 대신 실제 렌더링되는 벽 평면을 그대로 써서 방이 직사각형이 아니어도
-        // (L자 등) 정확하게 막힌다. capturedRoom 셸이 있으면 그쪽 우선.
         let rawWalls: [(transform: simd_float4x4, halfWidth: Float)]
         if let room = capturedRoom, !room.walls.isEmpty {
             rawWalls = room.walls.map { ($0.transform, $0.dimensions.x / 2) }
@@ -1236,8 +1622,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             uniquingKeysWith: { _, latest in latest }
         )
 
+        // Start at most four downloads at once; identical catalog assets share one request.
+        let prefetchTask: Task<Void, Never>? = showsRoomGuides ? Task {
+            let urls = payload.objects.compactMap { object -> URL? in
+                let fresh = freshObjectsById[object.identifier.lowercased()]
+                return (fresh?.usdzUrl ?? detail.catalogUSDZURL(modelKey: fresh?.modelKey ?? object.modelKey,
+                    filename: fresh?.modelFileName ?? object.modelFileName) ?? object.usdzUrl).flatMap(URL.init(string:))
+            }
+            await FurnitureAssetFiles.shared.prefetch(urls)
+        } : nil
+        defer { prefetchTask?.cancel() }
+
         // ── 가구 배치 ──────────────────────────────────────────────────────────
         for obj in payload.objects {
+            guard !Task.isCancelled else { return }
             guard let matrix = obj.simdTransform else { continue }
             let worldPos = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
             let freshObj = freshObjectsById[obj.identifier.lowercased()]
@@ -1259,18 +1657,23 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 guard !placed, let value = candidate, !value.isEmpty,
                       attempted.insert(value).inserted, let remoteURL = URL(string: value) else { continue }
                 do {
-                    var request = URLRequest(url: remoteURL)
-                    request.cachePolicy = .reloadIgnoringLocalCacheData
-                    let (tmpURL, response) = try await URLSession.shared.download(for: request)
-                    guard let http = response as? HTTPURLResponse,
-                          (200..<300).contains(http.statusCode) else {
-                        throw URLError(.badServerResponse)
+                    let loaded: Entity
+                    if showsRoomGuides {
+                        loaded = try await FurnitureModelTemplates.shared.load(remoteURL, fileExtension: ext)
+                    } else {
+                        var request = URLRequest(url: remoteURL)
+                        request.cachePolicy = .reloadIgnoringLocalCacheData
+                        let (tmpURL, response) = try await URLSession.shared.download(for: request)
+                        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                            throw URLError(.badServerResponse)
+                        }
+                        let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                            .appendingPathComponent(UUID().uuidString + "." + ext)
+                        try FileManager.default.moveItem(at: tmpURL, to: destURL)
+                        defer { try? FileManager.default.removeItem(at: destURL) }
+                        loaded = try Entity.loadSync(contentsOf: destURL)
                     }
-                    let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                        .appendingPathComponent(UUID().uuidString + "." + ext)
-                    try FileManager.default.moveItem(at: tmpURL, to: destURL)
-                    defer { try? FileManager.default.removeItem(at: destURL) }
-                    let loaded = try Entity.loadSync(contentsOf: destURL)
+                    guard !Task.isCancelled else { return }
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
                     anchor.addChild(loaded)
                     placed = true
@@ -1286,7 +1689,13 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             if !placed, allowsLocalFallback, let fileName = freshObj?.modelKey ?? obj.modelKey ?? freshObj?.modelFileName ?? obj.modelFileName,
                let localURL = findCatalogModel(named: fileName) {
                 do {
-                    let loaded = try Entity.loadSync(contentsOf: localURL)
+                    let loaded: Entity
+                    if showsRoomGuides {
+                        loaded = try await FurnitureModelTemplates.shared.loadLocal(localURL)
+                    } else {
+                        loaded = try Entity.loadSync(contentsOf: localURL)
+                    }
+                    guard !Task.isCancelled else { return }
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
                     if let furnitureTint {
                         applyTint(to: loaded, color: furnitureTint)
@@ -1858,6 +2267,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         }
         /// 편집 모드에서 선택된 가구를 옮기는 오른쪽 핸들바 — 선택 여부에 따라 보이기/숨기기
         var nudgeHandle: FurnitureNudgeHandle?
+        var guideOverlay: RoomGuideOverlay?
+
+        func guideItems() -> [RoomGuideItem] {
+            guard let roomAnchor else { return [] }
+            return entitiesByIdentifier.compactMap { identifier, entity in
+                guard entity.isEnabled, let baseline = poseBaseline[identifier] else { return nil }
+                let center = entity.position(relativeTo: roomAnchor) + entity.orientation.act(baseline.centerOffset)
+                let point = center + SIMD3<Float>(0, baseline.dimensions.y / 2 + 0.06, 0)
+                return RoomGuideItem(id: identifier,
+                    title: RoomGuideOverlay.furnitureName(category: baseline.category ?? "", height: baseline.dimensions.y),
+                    worldPoint: roomAnchor.convert(position: point, to: nil), selected: entity === selectedEntity,
+                    sizeText: String(format: "%.0f × %.0f cm", baseline.dimensions.x * 100, baseline.dimensions.z * 100))
+            }
+        }
 
         /// 벽 클램프의 2차 안전망 — 바닥 전체 사각형 (벽 구간 사이 틈으로 빠져나가는 극단적인 경우 대비)
         var floorTransform: simd_float4x4?
