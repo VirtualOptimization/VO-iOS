@@ -273,12 +273,14 @@ struct RoomVersionDetail: Decodable {
     var effectiveDataUrl: String? { layoutJsonUrl ?? dataUrl }
 
     /// A saved submission's inline positions must override the starting layout file.
-    func displayPayload(base: RoomDataPayload?, preferInlineObjects: Bool) -> RoomDataPayload? {
+    func displayPayload(base: RoomDataPayload?, preferInlineObjects: Bool,
+                        structure: RoomDataPayload? = nil) -> RoomDataPayload? {
         let source = base ?? jsonData
         let objects = preferInlineObjects ? (iosObjects ?? source?.objects) : (source?.objects ?? iosObjects)
         guard let objects else { return nil }
-        return RoomDataPayload(objects: objects, walls: source?.walls, floors: source?.floors,
-                               doors: source?.doors, windows: source?.windows)
+        let room = structure ?? source
+        return RoomDataPayload(objects: objects, walls: room?.walls, floors: room?.floors,
+                               doors: room?.doors, windows: room?.windows)
     }
 
     /// Match full catalog keys first. A basename fallback is safe only when unique.

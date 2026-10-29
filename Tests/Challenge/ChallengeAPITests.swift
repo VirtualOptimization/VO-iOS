@@ -62,6 +62,13 @@ enum ChallengeAPITests {
         precondition(submitted.objects[0].transform[3][0] == 2 && base.objects[0].transform[3][0] == 0)
         precondition(value.submitted.displayPayload(base: nil, preferInlineObjects: true)?.objects.count == 1)
 
+        let surface = RoomDataPayload.RoomSurface(center: [0,1.25,-2.5], dimensions: [4,2.5,0.1],
+            transform: [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,1.25,-2.5,1]])
+        let startStructure = RoomDataPayload(objects: [startingObject], walls: [surface], floors: [], doors: [], windows: [])
+        let comparable = value.submitted.displayPayload(base: nil, preferInlineObjects: true, structure: startStructure)!
+        precondition(comparable.walls?.count == 1 && comparable.objects[0].transform[3][0] == 2,
+                     "Shared transparent walls must not restore the starting furniture positions")
+
         ChallengeURLProtocol.response = { request in
             precondition(request.httpMethod == "DELETE" && request.url!.path == "/api/events/7/session")
             precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer rotated")

@@ -852,7 +852,8 @@ struct ChallengeRootView: View {
                         : AnyLayout(VStackLayout(spacing: 20))
                     arrangement {
                         ChallengeLayoutPreview(title: "시작 배치", detail: layout.start, height: isWide ? 360 : 300)
-                        ChallengeLayoutPreview(title: "내가 제출한 배치", detail: layout.submitted, height: isWide ? 360 : 300)
+                        ChallengeLayoutPreview(title: "내가 제출한 배치", detail: layout.submitted,
+                            height: isWide ? 360 : 300, referenceDetail: layout.start)
                     }
                     Text("나의 배치 점수 \(layout.result.totalScore, specifier: "%.1f")점")
                         .font(.semiBold16).foregroundStyle(Color.voBlue)
@@ -962,6 +963,7 @@ private struct ChallengeLayoutPreview: View {
     let title: String
     let detail: RoomVersionDetail
     let height: CGFloat
+    var referenceDetail: RoomVersionDetail? = nil
     @State private var ready = false
     @State private var error: String?
     @State private var retry = 0
@@ -969,9 +971,9 @@ private struct ChallengeLayoutPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.semiBold14)
-            FurnitureRealityKitView(detail: detail, isTransparent: true,
+            FurnitureRealityKitView(detail: detail, referenceDetail: referenceDetail, isTransparent: true,
                 onAssetFailure: { error = $0 }, onSceneReady: { ready = true }, prefersInlineObjects: true)
-                .id("\(detail.renderingID)-\(retry)")
+                .id("\(detail.renderingID)-\(referenceDetail?.renderingID ?? "")-\(retry)")
                 .frame(height: height)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay {

@@ -1330,6 +1330,8 @@ struct FurnitureColorLegendItem: Identifiable {
 
 struct FurnitureRealityKitView: UIViewRepresentable {
     let detail: RoomVersionDetail
+    /// Reuse the challenge's starting walls/floor without replacing submitted furniture positions.
+    var referenceDetail: RoomVersionDetail? = nil
     var capturedRoom: CapturedRoom? = nil   // B안: 제공 시 로컬 USDZ로 방 shell 렌더링
     var isTransparent: Bool = false         // 투명 모드: 반투명 벽 박스
     var allowsLocalFallback: Bool = true
@@ -1532,8 +1534,23 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 }
             }
         }
+        var referencePayload = referenceDetail?.jsonData
+        if referencePayload?.walls?.isEmpty != false,
+           let value = referenceDetail?.effectiveDataUrl, let url = URL(string: value) {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                referencePayload = try JSONDecoder().decode(RoomDataPayload.self, from: data)
+            } catch {
+                // The submitted room can still use its own structure or the shell fallback below.
+            }
+        }
         guard !Task.isCancelled else { return }
-        guard let payload = detail.displayPayload(base: downloaded, preferInlineObjects: prefersInlineObjects) else {
+        let structure = referencePayload?.walls?.isEmpty == false ? referencePayload : nil
+        guard let payload = detail.displayPayload(base: downloaded, preferInlineObjects: prefersInlineObjects,
+                                                structure: structure) else {
             onAssetFailure?("서버 공간의 배치 데이터가 없습니다.")
             return
         }
@@ -1545,6 +1562,14 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let ext = url.pathExtension.lowercased() == "usdz" ? "usdz" : "usdc"
                 let shell = try await FurnitureModelTemplates.shared.load(url, fileExtension: ext)
                 guard !Task.isCancelled else { return }
+                if isTransparent {
+                    // An imported empty-room mesh can otherwise retain opaque authored walls.
+                    if #available(iOS 18.0, *) {
+                        shell.components.set(OpacityComponent(opacity: 0.58))
+                    } else {
+                        applyTint(to: shell, color: effectiveWallColor)
+                    }
+                }
                 anchor.addChild(shell)
                 shellBounds = shell.visualBounds(relativeTo: anchor)
             } catch { onAssetFailure?("방 구조를 불러오지 못했어요. 다시 불러와 주세요.") }
