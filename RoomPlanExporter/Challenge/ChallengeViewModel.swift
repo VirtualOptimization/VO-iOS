@@ -3,11 +3,12 @@ import Combine
 
 @MainActor
 final class ChallengeViewModel: ObservableObject {
-    enum Screen: Equatable { case welcome, entry, criteria, loading, game, submitting, result, leaderboard }
+    enum Screen: Equatable { case welcome, entry, criteria, loading, game, submitting, result, layout, leaderboard }
     @Published var screen: Screen = .welcome
     @Published var event: ChallengeEvent?
     @Published var room: ChallengeRoom?
     @Published var result: ChallengeScore?
+    @Published private(set) var myLayout: ChallengeMyLayout?
     @Published var ranking: ChallengeLeaderboard?
     @Published var errorMessage: String?
     @Published var seconds = 0
@@ -24,18 +25,27 @@ final class ChallengeViewModel: ObservableObject {
     private let loadSaved: () -> ChallengeSavedSession?
     private let saveSaved: (ChallengeSavedSession) throws -> Void
     private let clearSaved: () -> Void
+    private let loadLastEvent: () -> Int?
+    private let saveLastEvent: (Int) -> Void
 
     init(configuredEventId: Int? = nil,
          serviceProvider: @escaping (Int) -> any ChallengeServing = { ChallengeService(eventId: $0) },
          loadSaved: @escaping () -> ChallengeSavedSession? = ChallengeSessionStore.load,
          saveSaved: @escaping (ChallengeSavedSession) throws -> Void = ChallengeSessionStore.save,
-         clearSaved: @escaping () -> Void = ChallengeSessionStore.clear) {
+         clearSaved: @escaping () -> Void = ChallengeSessionStore.clear,
+         loadLastEvent: @escaping () -> Int? = {
+             let id = UserDefaults.standard.integer(forKey: "vo.challenge.lastEvent")
+             return id > 0 ? id : nil
+         },
+         saveLastEvent: @escaping (Int) -> Void = { UserDefaults.standard.set($0, forKey: "vo.challenge.lastEvent") }) {
         let value = Bundle.main.object(forInfoDictionaryKey: "VOChallengeEventID")
         self.configuredEventId = configuredEventId ?? (value as? NSNumber)?.intValue ?? Int(value as? String ?? "") ?? 0
         self.serviceProvider = serviceProvider
         self.loadSaved = loadSaved
         self.saveSaved = saveSaved
         self.clearSaved = clearSaved
+        self.loadLastEvent = loadLastEvent
+        self.saveLastEvent = saveLastEvent
     }
 
     var eventId: Int { event?.eventId ?? configuredEventId }
@@ -49,7 +59,7 @@ final class ChallengeViewModel: ObservableObject {
         try saveSaved(ChallengeSavedSession(eventId: eventId, token: participantToken,
                                                               pending: pendingSubmission))
     }
-    private(set) var submittedSeconds = 0
+    private(set) var submittedSeconds: Int?
 
     func loadEvent() async {
         guard !isWorking else { return }
@@ -57,23 +67,32 @@ final class ChallengeViewModel: ObservableObject {
         defer { isWorking = false }
         errorMessage = nil
         do {
-            let saved = loadSaved()
-            if let saved, saved.pending != nil {
-                // Retry belongs to its original event even if no event is active now.
-                event = try await serviceProvider(saved.eventId).event()
+            var saved = loadSaved()
+            if let restored = saved {
+                // A saved record remains accessible after its event closes or a new event starts.
+                do { event = try await serviceProvider(restored.eventId).event() }
+                catch let error as APIError where error.statusCode == 404 {
+                    guard restored.pending == nil else { throw error }
+                    clearSaved()
+                    saved = nil
+                    event = try await serviceProvider(configuredEventId).event()
+                }
             } else {
                 do { event = try await serviceProvider(configuredEventId).event() }
                 catch let error as APIError where error.statusCode == 404 {
-                    guard let saved else { throw error }
-                    event = try await serviceProvider(saved.eventId).event()
+                    // Keep only a non-sensitive event ID after logout, never the participant token.
+                    guard configuredEventId == 0, let previousId = loadLastEvent() else { throw error }
+                    event = try await serviceProvider(previousId).event()
                 }
             }
+            saveLastEvent(eventId)
             participantToken = nil
             pendingSubmission = nil
             hasPendingSubmission = false
             hasSession = false
             remainingAttempts = 0
             result = nil
+            myLayout = nil
             if let saved, saved.eventId == eventId {
                 participantToken = saved.token
                 pendingSubmission = saved.pending
@@ -82,7 +101,7 @@ final class ChallengeViewModel: ObservableObject {
                 let status = try await service.session(token: saved.token)
                 remainingAttempts = status.remainingAttempts
                 result = status.latestResult
-                submittedSeconds = status.elapsedSeconds ?? 0
+                submittedSeconds = status.elapsedSeconds
             }
         } catch let error as APIError where error.statusCode == 401 {
             forgetParticipant()
@@ -93,10 +112,11 @@ final class ChallengeViewModel: ObservableObject {
     }
 
     func resume() async {
+        guard !isWorking else { return }
         if hasPendingSubmission { await submit(edits: []) }
         else if result != nil { screen = .result }
-        else if remainingAttempts > 0 { screen = .criteria }
-        else { errorMessage = "이미 도전 횟수를 모두 사용했어요." }
+        else if remainingAttempts > 0, event?.isActive == true { screen = .criteria }
+        else { await loadMyLayout(showComparison: false) }
     }
 
     func sceneLoaded() {
@@ -107,10 +127,25 @@ final class ChallengeViewModel: ObservableObject {
 
     var canSwitchParticipant: Bool { !isWorking && !hasPendingSubmission }
 
-    func beginNewParticipant() {
-        guard canSwitchParticipant else { return }
+    @discardableResult
+    func beginNewParticipant() async -> Bool {
+        guard canSwitchParticipant else { return false }
+        isWorking = true
+        defer { isWorking = false }
+        errorMessage = nil
+        if let participantToken {
+            do { try await service.leaveSession(token: participantToken) }
+            catch let error as APIError where error.statusCode == 401 {
+                // A rotated/revoked token is already signed out on the server.
+            } catch {
+                // Keep the identity locked until revocation succeeds; never silently switch visitors.
+                errorMessage = error.localizedDescription
+                return false
+            }
+        }
         forgetParticipant()
         screen = .entry
+        return true
     }
 
     func forgetParticipant() {
@@ -121,32 +156,85 @@ final class ChallengeViewModel: ObservableObject {
         hasSession = false
         remainingAttempts = 0
         result = nil
+        myLayout = nil
+        submittedSeconds = nil
+        sceneReady = false
+        sceneError = nil
         restart()
     }
 
     func start(name: String, phone: String) async {
         guard !isWorking else { return }
         isWorking = true
+        defer { isWorking = false }
         errorMessage = nil
         screen = .loading
         do {
             let registration = try await service.register(name: name, phone: phone)
-            guard registration.remainingAttempts > 0 else {
-                screen = .entry
-                errorMessage = "이미 도전 횟수를 모두 사용했어요."
-                isWorking = false
-                return
-            }
+            // Re-entry rotates the token, including when there are no attempts left.
             participantToken = registration.participantToken
             hasSession = true
             remainingAttempts = registration.remainingAttempts
-            screen = .criteria
+            result = nil
+            myLayout = nil
+            submittedSeconds = nil
+            room = nil
+            pendingSubmission = nil
+            hasPendingSubmission = false
+            sceneReady = false
+            startedAt = nil
             try saveSession()
+            screen = remainingAttempts > 0 && event?.isActive == true ? .criteria : .welcome
+            if registration.isReturning == true || remainingAttempts == 0 {
+                do {
+                    let layout = try await service.myLayout(token: registration.participantToken)
+                    myLayout = layout
+                    result = layout.result
+                    remainingAttempts = layout.result.remainingAttempts
+                    // Session contains elapsed time, which my-layout's result may omit.
+                    if let status = try? await service.session(token: registration.participantToken) {
+                        submittedSeconds = status.elapsedSeconds
+                    }
+                    screen = .welcome
+                } catch let error as APIError where error.statusCode == 404 {
+                    // Returning participants may have registered without submitting yet.
+                    if remainingAttempts == 0 { errorMessage = error.localizedDescription }
+                } catch let error as APIError where error.statusCode == 401 {
+                    forgetParticipant()
+                    screen = .entry
+                    errorMessage = "참가 정보가 만료됐어요. 다시 들어와 주세요."
+                } catch {
+                    screen = .welcome
+                    errorMessage = error.localizedDescription
+                }
+            }
         } catch {
-            screen = hasSession ? .criteria : .entry
+            screen = hasSession ? .welcome : .entry
             errorMessage = error.localizedDescription
         }
-        isWorking = false
+    }
+
+    func loadMyLayout(showComparison: Bool = true) async {
+        guard !isWorking, let participantToken else { return }
+        let previousScreen = screen
+        isWorking = true
+        screen = .loading
+        errorMessage = nil
+        defer { isWorking = false }
+        do {
+            let layout = try await service.myLayout(token: participantToken)
+            myLayout = layout
+            result = layout.result
+            remainingAttempts = layout.result.remainingAttempts
+            screen = showComparison ? .layout : .result
+        } catch let error as APIError where error.statusCode == 401 {
+            forgetParticipant()
+            screen = .entry
+            errorMessage = "참가 정보가 만료됐어요. 다시 들어와 주세요."
+        } catch {
+            screen = previousScreen
+            errorMessage = error.localizedDescription
+        }
     }
 
     func loadRoom() async {
@@ -200,6 +288,7 @@ final class ChallengeViewModel: ObservableObject {
         guard let submission = pendingSubmission else { return }
         do {
             try saveSession()
+            myLayout = nil
             result = try await service.submit(token: participantToken, elapsed: submission.elapsed,
                                               objects: submission.objects, key: submission.key)
             submittedSeconds = submission.elapsed
@@ -220,7 +309,7 @@ final class ChallengeViewModel: ObservableObject {
                 remainingAttempts = status.remainingAttempts
                 if let latest = status.latestResult {
                     result = latest
-                    submittedSeconds = status.elapsedSeconds ?? 0
+                    submittedSeconds = status.elapsedSeconds
                     screen = .result
                 } else { screen = .criteria }
             }

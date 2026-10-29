@@ -7,14 +7,33 @@ final class MockChallengeAPI: ChallengeServing {
     var failNextSubmission = true
     var submitted: [(UUID, Int, [ChallengeObjectEdit])] = []
     var roomCalls = 0
+    var registration = ChallengeRegistration(participantToken: "test-token", remainingAttempts: 2)
+    var registrationError: APIError?
+    var layoutValue: ChallengeMyLayout?
+    var layoutError: APIError?
+    var leaveError: APIError?
+    var layoutTokens: [String] = []
+    var leaveTokens: [String] = []
     func event() async throws -> ChallengeEvent { eventValue }
     func register(name: String, phone: String) async throws -> ChallengeRegistration {
-        ChallengeRegistration(participantToken: "test-token", remainingAttempts: 2)
+        if let registrationError { throw registrationError }
+        return registration
     }
     func session(token: String) async throws -> ChallengeParticipantSession { status }
     func room(token: String) async throws -> ChallengeRoom {
         roomCalls += 1
-        return ChallengeRoom(detail: RoomVersionDetail(dataUrl: "https://test/layout"), remainingAttempts: 2)
+        let detail = try JSONDecoder().decode(RoomVersionDetail.self, from: Data(#"{"data_url":"https://test/layout"}"#.utf8))
+        return ChallengeRoom(detail: detail, remainingAttempts: 2)
+    }
+    func myLayout(token: String) async throws -> ChallengeMyLayout {
+        layoutTokens.append(token)
+        if let layoutError { throw layoutError }
+        guard let layoutValue else { throw APIError(statusCode: 404, detail: "아직 제출한 배치가 없어요.") }
+        return layoutValue
+    }
+    func leaveSession(token: String) async throws {
+        leaveTokens.append(token)
+        if let leaveError { throw leaveError }
     }
     func submit(token: String, elapsed: Int, objects: [ChallengeObjectEdit], key: UUID) async throws -> ChallengeScore {
         submitted.append((key, elapsed, objects))
@@ -35,7 +54,7 @@ final class MockChallengeAPI: ChallengeServing {
         var resolvedIDs: [Int] = []
         func makeVM() -> ChallengeViewModel {
             ChallengeViewModel(configuredEventId: 0, serviceProvider: { id in resolvedIDs.append(id); return api },
-                               loadSaved: { saved }, saveSaved: { saved = $0 }, clearSaved: { saved = nil })
+                               loadSaved: { saved }, saveSaved: { saved = $0 }, clearSaved: { saved = nil }, loadLastEvent: { nil }, saveLastEvent: { _ in })
         }
         let vm = makeVM()
         await vm.loadEvent()
@@ -54,7 +73,7 @@ final class MockChallengeAPI: ChallengeServing {
         await vm.submit(edits: [])
         precondition(vm.hasPendingSubmission && saved?.pending != nil, "failed request is persisted")
         precondition(!vm.canSwitchParticipant)
-        vm.beginNewParticipant()
+        await vm.beginNewParticipant()
         vm.leaveGame()
         precondition(vm.hasSession && vm.hasPendingSubmission && saved?.pending != nil, "pending submission survives participant/exit actions")
         let savedPending = saved!
@@ -92,13 +111,91 @@ final class MockChallengeAPI: ChallengeServing {
         await resultRestore.resume()
         precondition(resultRestore.screen == .result && resultRestore.submittedSeconds == 65)
         resultRestore.isWorking = true
-        resultRestore.beginNewParticipant()
+        await resultRestore.beginNewParticipant()
         precondition(resultRestore.hasSession, "participant switch blocked during request")
         resultRestore.isWorking = false
         precondition(resultRestore.canSwitchParticipant)
-        resultRestore.beginNewParticipant()
+        await resultRestore.beginNewParticipant()
         precondition(saved == nil && !resultRestore.hasSession && resultRestore.screen == .entry,
                      "new participant action clears local session and opens entry directly")
+
+        precondition(api.leaveTokens == ["test-token"], "successful visitor switch revokes the server token")
+
+        // Re-entering with zero attempts replaces the token and lands on the home with a result.
+        let priorScore = ChallengeScore(attemptId: 4, totalScore: 72.5, maxScore: 100, disqualified: false,
+            breakdown: ["safety": 25], hints: [], beatAI: false, aiScore: nil, rank: 3,
+            totalRanked: 40, remainingAttempts: 0)
+        let detail = try JSONDecoder().decode(RoomVersionDetail.self, from: Data(#"{"ios_objects":[]}"#.utf8))
+        api.layoutValue = ChallengeMyLayout(result: priorScore, submitted: detail, start: detail)
+        api.registration = ChallengeRegistration(participantToken: "rotated-token", remainingAttempts: 0, isReturning: true)
+        api.status = ChallengeParticipantSession(remainingAttempts: 0, latestResult: priorScore, elapsedSeconds: 80)
+        let returning = makeVM()
+        await returning.loadEvent()
+        await returning.start(name: "visitor", phone: "01012345678")
+        precondition(returning.screen == .welcome && returning.hasSession && saved?.token == "rotated-token")
+        precondition(returning.result?.totalScore == 72.5 && returning.submittedSeconds == 80)
+        precondition(api.layoutTokens.last == "rotated-token", "my-layout uses only the new participant token")
+        let priorRoomCalls = api.roomCalls
+        await returning.resume()
+        precondition(returning.screen == .result && api.roomCalls == priorRoomCalls, "zero attempts never starts placement")
+        await returning.loadMyLayout()
+        precondition(returning.screen == .layout && returning.myLayout?.result.attemptId == 4)
+        await returning.loadRanking()
+        returning.closeRanking()
+        precondition(returning.screen == .layout)
+        api.layoutError = APIError(statusCode: 404, detail: "아직 제출한 배치가 없어요.")
+        await returning.loadMyLayout()
+        precondition(returning.screen == .layout && returning.errorMessage?.contains("아직 제출") == true)
+        api.layoutError = nil
+
+        // Network failure while signing out keeps the visitor locked in; retry can revoke later.
+        api.leaveError = APIError(statusCode: 0, detail: "연결 실패")
+        let failedExit = await returning.beginNewParticipant()
+        precondition(!failedExit && returning.hasSession && saved?.token == "rotated-token")
+        api.leaveError = nil
+        let didExit = await returning.beginNewParticipant()
+        precondition(didExit && !returning.hasSession && returning.myLayout == nil && saved == nil)
+        precondition(api.leaveTokens.last == "rotated-token")
+
+        // A registration conflict does not grant access to another participant's record.
+        api.registrationError = APIError(statusCode: 409, detail: "다른 닉네임으로 참여한 번호예요.")
+        await returning.start(name: "other", phone: "01012345678")
+        precondition(!returning.hasSession && returning.screen == .entry && saved == nil)
+        api.registrationError = nil
+
+        // Saved sessions restore their original closed event even when a newer event is configured.
+        saved = ChallengeSavedSession(eventId: 7, token: "closed-event-token", pending: nil)
+        api.eventValue = ChallengeEvent(eventId: 7, name: "종료 전시", isActive: false, maxAttempts: 1,
+            maxScore: 100, criteria: [], disqualifyRules: [])
+        resolvedIDs = []
+        let closed = makeVM()
+        await closed.loadEvent()
+        await closed.loadMyLayout()
+        precondition(resolvedIDs.first == 7 && closed.screen == .layout)
+        api.layoutError = APIError(statusCode: 401, detail: "만료")
+        await closed.loadMyLayout()
+        precondition(!closed.hasSession && closed.screen == .entry && saved == nil && closed.myLayout == nil)
+        api.layoutError = nil
+        api.eventValue = ChallengeEvent(eventId: 7, name: "전시", isActive: true, maxAttempts: 1,
+            maxScore: 100, criteria: [], disqualifyRules: [])
+        api.registration = ChallengeRegistration(participantToken: "unsubmitted", remainingAttempts: 1, isReturning: true)
+        api.layoutValue = nil
+        let unfinished = makeVM()
+        await unfinished.loadEvent()
+        await unfinished.start(name: "visitor", phone: "01012345678")
+        precondition(unfinished.screen == .criteria && unfinished.hasSession, "404 on a returning unsubmitted participant still allows the challenge")
+        api.leaveError = APIError(statusCode: 401, detail: "이전 토큰")
+        let alreadyRevoked = await unfinished.beginNewParticipant()
+        precondition(alreadyRevoked && saved == nil)
+        try await ChallengeAPITests.run()
+
+        let endedEntry = ChallengeViewModel(configuredEventId: 0, serviceProvider: { id in
+            if id == 0 { return MissingCurrentEventAPI() }
+            return api
+        }, loadSaved: { nil }, saveSaved: { _ in }, clearSaved: {},
+           loadLastEvent: { 7 }, saveLastEvent: { _ in })
+        await endedEntry.loadEvent()
+        precondition(endedEntry.eventId == 7 && !endedEntry.hasSession, "event metadata survives logout without preserving participant identity")
 
         // The submitted matrix keeps RoomPlan's column-vector convention.
         let object = ChallengeObjectEdit(pose: FurniturePoseEdit(identifier:"bed",center:[1,2,3],rotation:[0,.pi/2,0]))
@@ -143,4 +240,15 @@ final class MockChallengeAPI: ChallengeServing {
         print("PASS: server penalty rules decode; counted penalty feedback and legacy results; placement guide and grounded score review")
         print("PASS: event resolution, scene readiness, unchanged submission, durable retry, ranking navigation, reattempt, session/result recovery, participant reset, transform convention")
     }
+}
+
+private struct MissingCurrentEventAPI: ChallengeServing {
+    func event() async throws -> ChallengeEvent { throw APIError(statusCode: 404, detail: "종료") }
+    func register(name: String, phone: String) async throws -> ChallengeRegistration { fatalError() }
+    func session(token: String) async throws -> ChallengeParticipantSession { fatalError() }
+    func room(token: String) async throws -> ChallengeRoom { fatalError() }
+    func myLayout(token: String) async throws -> ChallengeMyLayout { fatalError() }
+    func leaveSession(token: String) async throws { fatalError() }
+    func submit(token: String, elapsed: Int, objects: [ChallengeObjectEdit], key: UUID) async throws -> ChallengeScore { fatalError() }
+    func leaderboard() async throws -> ChallengeLeaderboard { fatalError() }
 }

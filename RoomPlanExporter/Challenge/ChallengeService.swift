@@ -30,9 +30,17 @@ struct ChallengeCriterion: Decodable, Identifiable {
 struct ChallengeRegistration: Decodable {
     let participantToken: String
     let remainingAttempts: Int
+    var isReturning: Bool? = nil
     enum CodingKeys: String, CodingKey {
         case participantToken = "participant_token", remainingAttempts = "remaining_attempts"
+        case isReturning = "is_returning"
     }
+}
+
+struct ChallengeMyLayout: Decodable {
+    let result: ChallengeScore
+    let submitted: RoomVersionDetail
+    let start: RoomVersionDetail
 }
 
 struct ChallengeRoom {
@@ -219,12 +227,15 @@ protocol ChallengeServing {
     func register(name: String, phone: String) async throws -> ChallengeRegistration
     func session(token: String) async throws -> ChallengeParticipantSession
     func room(token: String) async throws -> ChallengeRoom
+    func myLayout(token: String) async throws -> ChallengeMyLayout
+    func leaveSession(token: String) async throws
     func submit(token: String, elapsed: Int, objects: [ChallengeObjectEdit], key: UUID) async throws -> ChallengeScore
     func leaderboard() async throws -> ChallengeLeaderboard
 }
 
 struct ChallengeService: ChallengeServing {
     let eventId: Int
+    var urlSession: URLSession = .shared
     private var base: URL {
         URL(string: "\(APIConfig.baseURL)/events/\(eventId > 0 ? String(eventId) : "current")")!
     }
@@ -237,10 +248,13 @@ struct ChallengeService: ChallengeServing {
         var req = URLRequest(url: components.url!)
         req.httpMethod = method
         req.timeoutInterval = 45
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let token {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+        }
         if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let idempotencyKey { req.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await urlSession.data(for: req)
         guard let status = (response as? HTTPURLResponse)?.statusCode else {
             throw APIError(statusCode: 0, detail: "서버에 연결할 수 없어요.")
         }
@@ -266,10 +280,19 @@ struct ChallengeService: ChallengeServing {
     func room(token: String) async throws -> ChallengeRoom {
         let data = try await request("challenge", token: token)
         let response = try JSONDecoder().decode(ChallengeRoomResponse.self, from: data)
-        guard response.start.effectiveDataUrl != nil else {
+        guard response.start.effectiveDataUrl != nil || response.start.iosObjects != nil || response.start.jsonData != nil else {
             throw APIError(statusCode: 0, detail: "방 배치 파일이 없어요.")
         }
         return ChallengeRoom(detail: response.start, remainingAttempts: response.remainingAttempts)
+    }
+
+    func myLayout(token: String) async throws -> ChallengeMyLayout {
+        try JSONDecoder().decode(ChallengeMyLayout.self, from: await request("my-layout", token: token))
+    }
+
+    func leaveSession(token: String) async throws {
+        // 204 deliberately has no JSON body.
+        _ = try await request("session", method: "DELETE", token: token)
     }
 
     func submit(token: String, elapsed: Int, objects: [ChallengeObjectEdit], key: UUID) async throws -> ChallengeScore {

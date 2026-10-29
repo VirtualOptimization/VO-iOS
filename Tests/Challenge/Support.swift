@@ -1,11 +1,7 @@
 import Foundation
 
-// Minimal shared-view types let the real networking and state machine compile
-// and run on macOS without constructing RealityKit or an iOS simulator.
-struct RoomVersionDetail: Decodable {
-    let dataUrl: String?
-    var effectiveDataUrl: String? { dataUrl }
-}
+// Editing payload used by the real networking/state-machine tests without RealityKit.
+// Room layout models are extracted from the production source by the test script.
 struct FurniturePoseEdit {
     let identifier: String
     let center: [Float]

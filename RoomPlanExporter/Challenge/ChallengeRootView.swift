@@ -45,10 +45,13 @@ struct ChallengeRootView: View {
         case .submit(let edits): Task { await vm.submit(edits: edits) }
         case .newParticipant:
             guard vm.canSwitchParticipant else { return }
-            name = ""
-            phone = ""
-            consent = false
-            vm.beginNewParticipant()
+            Task {
+                if await vm.beginNewParticipant() {
+                    name = ""
+                    phone = ""
+                    consent = false
+                }
+            }
         case .leaveGame: vm.leaveGame()
         case .reloadEvent: Task { await vm.loadEvent() }
         case nil:
@@ -79,6 +82,7 @@ struct ChallengeRootView: View {
         case .criteria: "채점 기준"
         case .game, .submitting: "가구 배치"
         case .result: "도전 결과"
+        case .layout: "내 배치 보기"
         case .leaderboard: "챌린지 랭킹"
         }
     }
@@ -96,6 +100,7 @@ struct ChallengeRootView: View {
         case .entry, .criteria: vm.screen = .welcome
         case .game, .submitting: activeSheet = .exit
         case .result: restart()
+        case .layout: vm.screen = .result
         case .leaderboard: vm.closeRanking()
         case .welcome, .loading: break
         }
@@ -110,11 +115,12 @@ struct ChallengeRootView: View {
                 case .entry: entry
                 case .criteria: criteria
                 case .loading:
-                    ProgressView("방을 준비하고 있어요…")
+                    ProgressView("불러오고 있어요…")
                         .font(.regular13)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .game, .submitting: game
                 case .result: result
+                case .layout: layoutComparison
                 case .leaderboard: leaderboard
                 }
             }
@@ -204,7 +210,11 @@ struct ChallengeRootView: View {
                     .accessibilityLabel("랭킹 새로고침")
                     .disabled(vm.isWorking)
                 } else if let onClose {
-                    Button(action: onClose) {
+                    Button {
+                        Task {
+                            if await vm.beginNewParticipant() { onClose() }
+                        }
+                    } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 15, weight: .medium))
                             .frame(width: 44, height: 44)
@@ -290,20 +300,21 @@ struct ChallengeRootView: View {
         if vm.isWorking {
             ProgressView().accessibilityLabel("이벤트 확인 중")
         } else if vm.event?.isActive == false {
-            Text("지금은 참여할 수 없어요").font(.regular12).foregroundStyle(.secondary)
+            Text("새 도전은 종료됐어요. 기존 참가자는 다시 들어가 기록을 볼 수 있어요.")
+                .font(.regular12).foregroundStyle(.secondary)
         }
     }
 
     private var welcomeActions: some View {
         VStack(spacing: 12) {
             if vm.hasSession {
-                Button("내 도전 이어하기") { Task { await vm.resume() } }
+                Button(vm.hasPendingSubmission ? "제출 재시도" : (vm.result != nil || vm.remainingAttempts == 0 ? "내 도전 결과 보기" : "내 도전 이어하기")) { Task { await vm.resume() } }
                     .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
             } else {
-                Button("챌린지 시작하기") { vm.screen = .entry }
+                Button(vm.event?.isActive == false ? "내 기록으로 다시 들어가기" : "참가 등록 · 재입장") { vm.screen = .entry }
                     .buttonStyle(VOFilledButtonStyle())
-                    .disabled(vm.event?.isActive != true || vm.isWorking)
-                    .opacity(vm.event?.isActive == true ? 1 : 0.45)
+                    .disabled(vm.event == nil || vm.isWorking)
+                    .opacity(vm.event != nil ? 1 : 0.45)
             }
             Button("현재 랭킹 보기") { Task { await vm.loadRanking() } }
                 .buttonStyle(VOOutlineButtonStyle()).disabled(vm.event == nil || vm.isWorking)
@@ -356,7 +367,7 @@ struct ChallengeRootView: View {
             layout {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("참가자 정보를 입력해주세요").font(.semiBold20)
-                    Text("닉네임은 랭킹에 그대로 표시돼요.")
+                    Text("닉네임은 랭킹에 그대로 표시돼요.\n다시 들어오셨다면 이전과 같은 닉네임·전화번호를 입력해주세요.")
                         .font(.regular12).foregroundStyle(.secondary)
                     if isWide { entryPrivacy.padding(.top, 16) }
                 }
@@ -414,7 +425,7 @@ struct ChallengeRootView: View {
     }
 
     private var entryAction: some View {
-        Button("기준 확인하기") {
+        Button("참가 정보 확인하기") {
             focusedField = nil
             Task {
                 await vm.start(name: name, phone: phone)
@@ -593,7 +604,7 @@ struct ChallengeRootView: View {
 
     private var newParticipantConfirmation: some View {
         confirmationPanel(
-            "다른 참가자로 시작할까요?", message: "이 기기의 참가 정보를 지우고 새 참가자 입력 화면으로 이동해요. 이전 참가자의 서버 기록과 랭킹은 유지돼요."
+            "다른 참가자로 시작할까요?", message: "서버에서 로그아웃하고 이 기기의 참가 정보를 지워요. 기록과 랭킹은 유지되며, 같은 닉네임·전화번호로 다시 들어와 볼 수 있어요."
         ) {
             Button("새 참가자 입력하기") { confirm(.newParticipant) }
                 .buttonStyle(VOFilledButtonStyle()).disabled(!vm.canSwitchParticipant)
@@ -757,7 +768,7 @@ struct ChallengeRootView: View {
                                 resultMetric(
                                     "현재 순위", score.rank.map { "\($0)위 / \(score.totalRanked)명" } ?? "순위 없음")
                                 Divider().frame(height: 36)
-                                resultMetric("소요 시간", "\(vm.submittedSeconds / 60)분 \(vm.submittedSeconds % 60)초")
+                                resultMetric("소요 시간", vm.submittedSeconds.map { "\($0 / 60)분 \($0 % 60)초" } ?? "—")
                             }
                             .padding(18).voGlassCard(cornerRadius: 16)
                             .alignmentGuide(Self.resultCardTop) { dimensions in dimensions[.top] }
@@ -813,6 +824,8 @@ struct ChallengeRootView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
+                Button("내 배치 보기") { Task { await vm.loadMyLayout() } }
+                    .buttonStyle(VOOutlineButtonStyle()).disabled(vm.isWorking)
                 Button("랭킹 보기") { Task { await vm.loadRanking() } }
                     .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
                 Button {
@@ -825,6 +838,34 @@ struct ChallengeRootView: View {
             }
             .frame(maxWidth: 440).padding(.horizontal, 32).padding(.vertical, 16)
             .frame(maxWidth: .infinity).background(Color(.systemBackground))
+        }
+    }
+
+    private var layoutComparison: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Text("처음 방과 내가 제출한 배치를 비교해보세요")
+                    .font(.semiBold16).padding(.top, 24)
+                if let layout = vm.myLayout {
+                    let arrangement = isWide
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+                        : AnyLayout(VStackLayout(spacing: 20))
+                    arrangement {
+                        ChallengeLayoutPreview(title: "시작 배치", detail: layout.start, height: isWide ? 360 : 300)
+                        ChallengeLayoutPreview(title: "내가 제출한 배치", detail: layout.submitted, height: isWide ? 360 : 300)
+                    }
+                    Text("나의 배치 점수 \(layout.result.totalScore, specifier: "%.1f")점")
+                        .font(.semiBold16).foregroundStyle(Color.voBlue)
+                }
+            }
+            .padding(.horizontal, 32).padding(.bottom, 24)
+            .frame(maxWidth: 1200).frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("도전 결과로 돌아가기") { vm.screen = .result }
+                .buttonStyle(VOFilledButtonStyle()).disabled(vm.isWorking)
+                .frame(maxWidth: 440).padding(.horizontal, 32).padding(.vertical, 16)
+                .frame(maxWidth: .infinity).background(Color(.systemBackground))
         }
     }
 
@@ -913,5 +954,37 @@ struct ChallengeRootView: View {
         }
         .padding(.vertical, 16)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Same room viewer and visual treatment as the challenge; viewing never enables editing or a timer.
+private struct ChallengeLayoutPreview: View {
+    let title: String
+    let detail: RoomVersionDetail
+    let height: CGFloat
+    @State private var ready = false
+    @State private var error: String?
+    @State private var retry = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.semiBold14)
+            FurnitureRealityKitView(detail: detail, isTransparent: true,
+                onAssetFailure: { error = $0 }, onSceneReady: { ready = true }, prefersInlineObjects: true)
+                .id("\(detail.renderingID)-\(retry)")
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay {
+                    if let error {
+                        VStack(spacing: 12) {
+                            Text(error).font(.regular12).multilineTextAlignment(.center)
+                            Button("다시 불러오기") { self.error = nil; ready = false; retry += 1 }
+                                .buttonStyle(VOOutlineButtonStyle())
+                        }
+                        .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    } else if !ready { ProgressView("방을 불러오고 있어요…").font(.regular12) }
+                }
+        }
+        .frame(maxWidth: .infinity)
     }
 }

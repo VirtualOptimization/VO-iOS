@@ -1338,6 +1338,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     var onColorLegendReady: (([FurnitureColorLegendItem]) -> Void)? = nil
     /// General V-O viewer only. Challenge keeps its existing presentation and loading path.
     var showsRoomGuides: Bool = false
+    var prefersInlineObjects: Bool = false
     var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
@@ -1515,23 +1516,38 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             adjustCamera(anchor: anchor, coordinator: coordinator, positions: allPos)
         }
 
-        // ── JSON 다운로드 ──────────────────────────────────────────────────────
-        guard let dataURLString = detail.effectiveDataUrl,
-              let dataURL = URL(string: dataURLString) else {
-            onAssetFailure?("서버 원본 공간의 배치 파일이 없습니다.")
-            print("⚠️ layout_json_url/data_url 없음 – 방 구조만 표시")
+        // Use the saved submission's inline coordinates, even if its JSON URL is the start layout.
+        var downloaded: RoomDataPayload?
+        if let value = detail.effectiveDataUrl, let url = URL(string: value) {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                downloaded = try JSONDecoder().decode(RoomDataPayload.self, from: data)
+            } catch {
+                guard detail.iosObjects != nil || detail.jsonData != nil else {
+                    onAssetFailure?("서버 공간 데이터를 불러오지 못했습니다.")
+                    return
+                }
+            }
+        }
+        guard !Task.isCancelled else { return }
+        guard let payload = detail.displayPayload(base: downloaded, preferInlineObjects: prefersInlineObjects) else {
+            onAssetFailure?("서버 공간의 배치 데이터가 없습니다.")
             return
         }
 
-        let payload: RoomDataPayload
-        do {
-            let (jsonData, _) = try await URLSession.shared.data(from: dataURL)
-            payload = try JSONDecoder().decode(RoomDataPayload.self, from: jsonData)
-            print("✅ JSON 파싱 완료: 오브젝트 \(payload.objects.count)개")
-        } catch {
-            onAssetFailure?("서버 공간 데이터를 불러오지 못했습니다.")
-            print("❌ data_url 파싱 실패: \(error) – 방 구조만 표시")
-            return
+        var shellBounds: BoundingBox?
+        if capturedRoom == nil, payload.walls?.isEmpty != false,
+           let value = detail.usdzEmptyUrl ?? detail.roomShellUrl, let url = URL(string: value) {
+            do {
+                let ext = url.pathExtension.lowercased() == "usdz" ? "usdz" : "usdc"
+                let shell = try await FurnitureModelTemplates.shared.load(url, fileExtension: ext)
+                guard !Task.isCancelled else { return }
+                anchor.addChild(shell)
+                shellBounds = shell.visualBounds(relativeTo: anchor)
+            } catch { onAssetFailure?("방 구조를 불러오지 못했어요. 다시 불러와 주세요.") }
         }
 
         let rawWalls: [(transform: simd_float4x4, halfWidth: Float)]
@@ -1559,6 +1575,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         // ── capturedRoom이 없을 때만 JSON으로 방 구조 렌더링 ──────────────────
         if capturedRoom == nil {
             var allPos: [SIMD3<Float>] = []
+            if let shellBounds { allPos += [shellBounds.min, shellBounds.max] }
             for w in payload.walls   ?? [] { if let t = w.simdTransform { allPos.append(t.columns.3.xyz) } }
             for f in payload.floors  ?? [] { if let t = f.simdTransform { allPos.append(t.columns.3.xyz) } }
             for o in payload.objects {
@@ -1624,7 +1641,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                                        filename: freshObj?.modelFileName ?? obj.modelFileName), "usdz"),
                 (obj.usdzUrl, "usdz"),
                 (freshObj?.usdcUrl, "usdc"),
-                (obj.usdcUrl, "usdc")
+                (obj.usdcUrl, "usdc"),
+                ((freshObj?.modelKey ?? obj.modelKey).flatMap { detail.modelUrls?[$0] }, "usdc")
             ]
             var attempted = Set<String>()
             for (candidate, ext) in candidates {

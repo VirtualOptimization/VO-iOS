@@ -218,6 +218,8 @@ struct UserEditedVersionCreateResponse: Decodable {
 
 /// 버전 상세 응답 (신: layout_json_url / 구: data_url 둘 다 지원)
 struct RoomVersionDetail: Decodable {
+    let roomShellUrl: String?
+    let jsonData: RoomDataPayload?
     let usdzUrl:         String?
     let usdzEmptyUrl:    String?
     let glbUrl:          String?
@@ -236,6 +238,8 @@ struct RoomVersionDetail: Decodable {
     let iosObjects:      [RoomDataPayload.RoomObject]?
 
     enum CodingKeys: String, CodingKey {
+        case roomShellUrl = "room_shell_url"
+        case jsonData = "json_data"
         case usdzUrl       = "usdz_url"
         case usdzEmptyUrl  = "usdz_empty_url"
         case glbUrl        = "glb_url"
@@ -248,12 +252,39 @@ struct RoomVersionDetail: Decodable {
         case iosObjects    = "ios_objects"
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        roomShellUrl = try c.decodeIfPresent(String.self, forKey: .roomShellUrl)
+        // Legacy versions may contain a Unity/raw JSON shape here; their URL remains usable.
+        jsonData = try? c.decode(RoomDataPayload.self, forKey: .jsonData)
+        usdzUrl = try c.decodeIfPresent(String.self, forKey: .usdzUrl)
+        usdzEmptyUrl = try c.decodeIfPresent(String.self, forKey: .usdzEmptyUrl)
+        glbUrl = try c.decodeIfPresent(String.self, forKey: .glbUrl)
+        layoutJsonUrl = try c.decodeIfPresent(String.self, forKey: .layoutJsonUrl)
+        unityJsonUrl = try c.decodeIfPresent(String.self, forKey: .unityJsonUrl)
+        dataUrl = try c.decodeIfPresent(String.self, forKey: .dataUrl)
+        unityDataUrl = try c.decodeIfPresent(String.self, forKey: .unityDataUrl)
+        modelUrls = try c.decodeIfPresent([String: String].self, forKey: .modelUrls)
+        modelUsdzUrls = try c.decodeIfPresent([String: String].self, forKey: .modelUsdzUrls)
+        iosObjects = try c.decodeIfPresent([RoomDataPayload.RoomObject].self, forKey: .iosObjects)
+    }
+
     /// 렌더링에 사용할 iOS JSON URL (신규 우선, 구버전 폴백)
     var effectiveDataUrl: String? { layoutJsonUrl ?? dataUrl }
 
+    /// A saved submission's inline positions must override the starting layout file.
+    func displayPayload(base: RoomDataPayload?, preferInlineObjects: Bool) -> RoomDataPayload? {
+        let source = base ?? jsonData
+        let objects = preferInlineObjects ? (iosObjects ?? source?.objects) : (source?.objects ?? iosObjects)
+        guard let objects else { return nil }
+        return RoomDataPayload(objects: objects, walls: source?.walls, floors: source?.floors,
+                               doors: source?.doors, windows: source?.windows)
+    }
+
     /// Match full catalog keys first. A basename fallback is safe only when unique.
     func catalogUSDZURL(modelKey: String?, filename: String?) -> String? {
-        let urls = modelUsdzUrls ?? [:]
+        let fallback = (modelUrls ?? [:]).filter { URL(string: $0.value)?.pathExtension.lowercased() == "usdz" }
+        let urls = fallback.merging(modelUsdzUrls ?? [:], uniquingKeysWith: { _, fresh in fresh })
         if let modelKey, let exact = urls[modelKey], !exact.isEmpty { return exact }
         guard let name = (modelKey ?? filename)?.split(separator: "/").last else { return nil }
         let matches = urls.filter { $0.key.split(separator: "/").last == name && !$0.value.isEmpty }
@@ -262,13 +293,14 @@ struct RoomVersionDetail: Decodable {
 
     /// Recreate the scene when refreshed asset URLs change, even for the same layout.
     var renderingID: String {
-        var parts: [String] = [effectiveDataUrl ?? "", usdzUrl ?? ""]
+        var parts: [String] = [effectiveDataUrl ?? "", usdzUrl ?? "", roomShellUrl ?? ""]
         for (key, value) in (modelUsdzUrls ?? [:]).sorted(by: { $0.key < $1.key }) {
             parts.append(key)
             parts.append(value)
         }
         for object in iosObjects ?? [] {
             parts.append(object.identifier)
+            parts.append(String(describing: object.transform))
             parts.append(object.usdzUrl ?? "")
             parts.append(object.usdcUrl ?? "")
         }
