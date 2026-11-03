@@ -102,6 +102,7 @@ private struct ScanFlowView: View {
                             "버전 선택에서 원본과 비교할 수 있어요"
                         ]
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     Button { vm.leaveOptimizationScreen() } label: {
                         HStack(spacing: 6) {

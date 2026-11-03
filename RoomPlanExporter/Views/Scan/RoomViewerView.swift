@@ -9,6 +9,444 @@
 import SwiftUI
 import RealityKit
 import RoomPlan
+import Combine
+import CryptoKit
+
+// MARK: - Initial chair/table overlap allowances
+
+struct FurnitureCollisionPolicy {
+    private struct Pair: Hashable {
+        let first: String
+        let second: String
+        init(_ a: String, _ b: String) {
+            first = min(a, b)
+            second = max(a, b)
+        }
+    }
+    private var allowances: [Pair: Float] = [:]
+
+    mutating func recordInitialOverlap(_ first: String, category firstCategory: String?,
+                                       _ second: String, category secondCategory: String?,
+                                       penetration: Float) {
+        let categories = Set([firstCategory?.lowercased() ?? "", secondCategory?.lowercased() ?? ""])
+        guard first != second, categories.contains("chair"),
+              !categories.isDisjoint(with: ["table", "desk"]),
+              penetration.isFinite, penetration > 0 else { return }
+        // Immutable for the life of this loaded layout: editing never expands the allowance.
+        let pair = Pair(first, second)
+        if allowances[pair] == nil { allowances[pair] = penetration }
+    }
+
+    func excess(_ first: String, _ second: String, penetration: Float) -> Float {
+        max(0, penetration - (allowances[Pair(first, second)] ?? 0))
+    }
+
+    static func accepts(previous: [String: Float], proposed: [String: Float]) -> Bool {
+        let epsilon: Float = 0.0001
+        // A reduction against one object must never pay for a new collision with another.
+        for (id, value) in proposed where value > epsilon {
+            guard let oldValue = previous[id], oldValue > epsilon,
+                  value <= oldValue + epsilon else { return false }
+        }
+        let oldTotal = previous.values.reduce(0, +)
+        let newTotal = proposed.values.reduce(0, +)
+        return newTotal <= epsilon || newTotal < oldTotal - epsilon
+    }
+}
+
+// MARK: - General V-O asset reuse
+
+actor FurnitureAssetFiles {
+    static let shared = FurnitureAssetFiles()
+    private var inFlight: [String: Task<URL, Error>] = [:]
+    private let session: URLSession
+    private let directory: URL
+    private var cleaned = false
+
+    init(session: URLSession = .shared, directory: URL? = nil) {
+        self.session = session
+        self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("VOFurnitureAssets", isDirectory: true)
+    }
+
+    /// Signed S3 URLs change on each visit; the object path and optional version ID identify the asset.
+    nonisolated static func cacheKey(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
+        if (parts.host ?? "").contains(".s3.") || (parts.host ?? "").contains(".s3-") {
+            parts.queryItems = parts.queryItems?.filter { $0.name == "versionId" }
+            if parts.queryItems?.isEmpty == true { parts.query = nil }
+        }
+        parts.fragment = nil
+        return parts.string ?? url.absoluteString
+    }
+
+    func file(for url: URL, fileExtension: String) async throws -> URL {
+        if !cleaned {
+            cleaned = true
+            let files = (try? FileManager.default.contentsOfDirectory(at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for file in files {
+                if let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                   Date().timeIntervalSince(date) >= 86_400 {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        }
+        let key = Self.cacheKey(url) + "." + fileExtension
+        if let pending = inFlight[key] { return try await pending.value }
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        let destination = directory.appendingPathComponent(digest).appendingPathExtension(fileExtension)
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path),
+           let date = attributes[.modificationDate] as? Date,
+           let size = attributes[.size] as? NSNumber, size.intValue > 0,
+           Date().timeIntervalSince(date) < 86_400 {
+            return destination
+        }
+        let session = session
+        let directory = directory
+        let download = Task<URL, Error> {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30
+            let (temporary, response) = try await session.download(for: request)
+            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            return destination
+        }
+        inFlight[key] = download
+        defer { inFlight[key] = nil }
+        return try await download.value
+    }
+
+    func invalidate(_ url: URL, fileExtension: String) {
+        let key = Self.cacheKey(url) + "." + fileExtension
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(digest).appendingPathExtension(fileExtension))
+    }
+
+    func prefetch(_ urls: [URL]) async {
+        var seen = Set<String>()
+        var iterator = urls.filter { seen.insert(Self.cacheKey($0)).inserted }.makeIterator()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 {
+                guard let url = iterator.next() else { break }
+                group.addTask { _ = try? await self.file(for: url, fileExtension: "usdz") }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, let url = iterator.next() else { group.cancelAll(); break }
+                group.addTask { _ = try? await self.file(for: url, fileExtension: "usdz") }
+            }
+        }
+    }
+}
+
+@MainActor
+private final class FurnitureModelTemplates {
+    static let shared = FurnitureModelTemplates()
+    private let models = NSCache<NSString, Entity>()
+    private var pending: [String: Task<Entity, Error>] = [:]
+
+    init() { models.countLimit = 24 }
+
+    func load(_ url: URL, fileExtension: String) async throws -> Entity {
+        let key = FurnitureAssetFiles.cacheKey(url) + "." + fileExtension
+        if let cached = models.object(forKey: key as NSString) { return cached.clone(recursive: true) }
+        if let pending = pending[key] { return try await pending.value.clone(recursive: true) }
+        let task = Task<Entity, Error> { @MainActor in
+            let file = try await FurnitureAssetFiles.shared.file(for: url, fileExtension: fileExtension)
+            do {
+                for try await model in Entity.loadAsync(contentsOf: file).values { return model }
+            } catch {
+                await FurnitureAssetFiles.shared.invalidate(url, fileExtension: fileExtension)
+                throw error
+            }
+            throw URLError(.cannotDecodeContentData)
+        }
+        pending[key] = task
+        defer { pending[key] = nil }
+        let model = try await task.value
+        models.setObject(model, forKey: key as NSString)
+        return model.clone(recursive: true)
+    }
+
+    func loadLocal(_ url: URL) async throws -> Entity {
+        let key = "local:" + url.path
+        if let model = models.object(forKey: key as NSString) { return model.clone(recursive: true) }
+        if let task = pending[key] { return try await task.value.clone(recursive: true) }
+        let task = Task<Entity, Error> { @MainActor in
+            for try await model in Entity.loadAsync(contentsOf: url).values { return model }
+            throw URLError(.cannotDecodeContentData)
+        }
+        pending[key] = task
+        defer { pending[key] = nil }
+        let model = try await task.value
+        models.setObject(model, forKey: key as NSString)
+        return model.clone(recursive: true)
+    }
+}
+
+// MARK: - Furniture names and floor-calibrated centimetre rulers
+
+struct RoomGuideItem {
+    let id: String
+    let title: String
+    let worldPoint: SIMD3<Float>
+    let selected: Bool
+    var sizeText: String? = nil
+    var color: UIColor = .systemGray
+}
+
+private final class FurnitureNameLabel: UILabel {
+    private let horizontalPadding: CGFloat = 8
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.insetBy(dx: horizontalPadding, dy: 0))
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let textSize = super.sizeThatFits(CGSize(width: max(0, size.width - horizontalPadding * 2), height: size.height))
+        return CGSize(width: ceil(textSize.width) + horizontalPadding * 2, height: 22)
+    }
+}
+
+final class RoomGuideOverlay: UIView {
+    weak var arView: ARView?
+    weak var roomAnchor: AnchorEntity?
+    var items: (() -> [RoomGuideItem])?
+    var floorY: (() -> Float)?
+    private var displayLink: CADisplayLink?
+    private var labels: [String: UILabel] = [:]
+    var showsNames = false { didSet { refresh() } }
+    var showsRuler = false { didSet { setNeedsDisplay() } }
+    private let rulerWidth: CGFloat = 20
+    private var lastCameraPosition = SIMD3<Float>(repeating: .nan)
+    private var lastCameraRotation = SIMD4<Float>(repeating: .nan)
+    private var lastRoomPosition = SIMD3<Float>(repeating: .nan)
+    private var lastSize = CGSize.zero
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = .clear
+        accessibilityElementsHidden = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        stop()
+        if window != nil {
+            let link = CADisplayLink(target: self, selector: #selector(refresh))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 20, preferred: 15)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+    }
+    func stop() { displayLink?.invalidate(); displayLink = nil }
+
+    /// Prefer the colored body over white bedding or dark legs in multipart models.
+    static func furnitureColor(of entity: Entity) -> UIColor? {
+        var candidates: [UIColor] = []
+        func collect(_ node: Entity) {
+            if let model = node as? ModelEntity {
+                for material in model.model?.materials ?? [] {
+                    if let simple = material as? SimpleMaterial, simple.color.texture == nil {
+                        candidates.append(simple.color.tint)
+                    } else if let pbr = material as? PhysicallyBasedMaterial, pbr.baseColor.texture == nil {
+                        candidates.append(pbr.baseColor.tint)
+                    }
+                }
+            }
+            for child in node.children { collect(child) }
+        }
+        func prominence(_ color: UIColor) -> CGFloat {
+            var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+            color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+            return alpha > 0.1 ? saturation * brightness : -1
+        }
+        collect(entity)
+        return candidates.max { prominence($0) < prominence($1) }
+    }
+
+    static func furnitureName(category: String, height: Float) -> String {
+        switch category.lowercased() {
+        case "bed": return "침대"
+        case "table", "desk": return "책상·테이블"
+        case "chair": return "의자"
+        case "sofa": return "소파"
+        case "storage": return height >= 1.2 ? "옷장·수납장" : "서랍장·수납장"
+        case "television": return "TV"
+        case "refrigerator": return "냉장고"
+        case "washerdryer": return "세탁기"
+        case "custom": return "추가 가구"
+        default: return "가구"
+        }
+    }
+
+    @objc private func refresh() {
+        guard let arView, bounds.width > 0 else { return }
+        let current = (showsNames ? (items?() ?? []) : []).sorted { $0.id < $1.id }
+        let identifiers = Set(current.map(\.id))
+        for id in Set(labels.keys).subtracting(identifiers) { labels.removeValue(forKey: id)?.removeFromSuperview() }
+        let safeRect = bounds.inset(by: UIEdgeInsets(top: 56, left: 12, bottom: 76, right: 12))
+        guard safeRect.width > 0, safeRect.height > 0 else { return }
+        var occupied: [CGRect] = []
+        for item in current.sorted(by: { $0.selected && !$1.selected }) {
+            let label = labels[item.id] ?? {
+                let label = FurnitureNameLabel()
+                label.font = UIFont(name: "Pretendard-Medium", size: 11) ?? .systemFont(ofSize: 11, weight: .medium)
+                label.lineBreakMode = .byTruncatingTail
+                label.layer.cornerRadius = 6
+                label.isAccessibilityElement = false
+                label.clipsToBounds = true
+                label.textAlignment = .center
+                addSubview(label)
+                labels[item.id] = label
+                return label
+            }()
+            guard let point = arView.project(item.worldPoint), point.x.isFinite, point.y.isFinite,
+                  bounds.contains(point) else {
+                label.isHidden = true
+                continue
+            }
+            label.text = "\(item.title)\(item.selected ? item.sizeText.map { " · " + $0 } ?? "" : "")"
+            let color = (item.selected ? UIColor.systemBlue : item.color).withAlphaComponent(1)
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            func linear(_ value: CGFloat) -> CGFloat {
+                value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+            label.textColor = luminance > 0.179 ? .black : .white
+            label.backgroundColor = color.withAlphaComponent(0.45)
+            label.layer.borderWidth = item.selected ? 2 : 0.75
+            label.layer.borderColor = (item.selected ? UIColor.systemBlue.withAlphaComponent(0.95) : UIColor.black.withAlphaComponent(0.22)).cgColor
+            // Measure the text independently of the previous label frame so repeated
+            // updates never shrink the content or accumulate padding.
+            let textWidth = ((label.text ?? "") as NSString).size(withAttributes: [.font: label.font!]).width
+            let width = min(ceil(textWidth) + 16, min(240, safeRect.width))
+            let x = min(max(point.x - width / 2, safeRect.minX), safeRect.maxX - width)
+            let y = min(max(point.y - 28, safeRect.minY), safeRect.maxY - 24)
+            let candidates = [CGFloat(0), -28, 28, -56, 56, -84, 84].map {
+                CGRect(x: x, y: y + $0, width: width, height: 24)
+            }
+            guard let frame = candidates.first(where: { candidate in
+                safeRect.contains(candidate) && !occupied.contains { $0.intersects(candidate.insetBy(dx: -3, dy: -3)) }
+            }) else {
+                label.isHidden = true
+                continue
+            }
+            label.frame = frame
+            label.isHidden = false
+            occupied.append(frame)
+        }
+        let camera = arView.cameraTransform
+        let roomPosition = roomAnchor?.position(relativeTo: nil) ?? .zero
+        if lastCameraPosition != camera.translation || lastCameraRotation != camera.rotation.vector
+            || lastRoomPosition != roomPosition || lastSize != bounds.size {
+            lastCameraPosition = camera.translation
+            lastCameraRotation = camera.rotation.vector
+            lastRoomPosition = roomPosition
+            lastSize = bounds.size
+            setNeedsDisplay()
+        }
+    }
+
+    /// Intersect each screen ray with the actual room floor. No assumed pixels-to-centimetres ratio.
+    private func floorPoint(at point: CGPoint) -> SIMD3<Float>? {
+        guard let arView, let roomAnchor, let ray = arView.ray(through: point) else { return nil }
+        let origin = roomAnchor.convert(position: ray.origin, from: nil)
+        let direction = roomAnchor.convert(direction: ray.direction, from: nil)
+        guard abs(direction.y) > 0.0001 else { return nil }
+        let distance = ((floorY?() ?? 0) - origin.y) / direction.y
+        guard distance > 0, distance < 100 else { return nil }
+        return origin + direction * distance
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard showsRuler, let context = UIGraphicsGetCurrentContext() else { return }
+        UIColor(red: 0.96, green: 0.94, blue: 0.90, alpha: 0.8).setFill()
+        context.fill(CGRect(x: 0, y: 0, width: bounds.width, height: rulerWidth))
+        context.fill(CGRect(x: 0, y: 0, width: rulerWidth, height: bounds.height))
+        drawRuler(horizontal: true, context: context)
+        drawRuler(horizontal: false, context: context)
+        ("cm" as NSString).draw(at: CGPoint(x: 2, y: 4), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 8, weight: .medium), .foregroundColor: UIColor.darkGray
+        ])
+    }
+
+    private func drawRuler(horizontal: Bool, context: CGContext) {
+        let end = horizontal ? bounds.width : bounds.height
+        guard end > 60 else { return }
+        let samples: [(CGFloat, SIMD3<Float>)] = stride(from: Double(rulerWidth + 10), through: Double(end - 8), by: 12).compactMap {
+            let value = CGFloat($0)
+            return floorPoint(at: horizontal ? CGPoint(x: value, y: rulerWidth) : CGPoint(x: rulerWidth, y: value)).map { (value, $0) }
+        }
+        guard let first = samples.first, let last = samples.last, samples.count > 1 else { return }
+        let axis = abs(last.1.x - first.1.x) >= abs(last.1.z - first.1.z) ? 0 : 2
+        let coordinates = samples.map { Double($0.1[axis]) }
+        guard let low = coordinates.min(), let high = coordinates.max(), high - low > 0.01 else { return }
+        let steps: [Double] = [0.1, 0.2, 0.5, 1, 2, 5, 10]
+        let step = steps.first { (high - low) / $0 < Double(end / 12) } ?? 10
+        let start = Int(ceil(low / step)), finish = Int(floor(high / step))
+        guard finish >= start, finish - start < 200 else { return }
+        context.setStrokeColor(UIColor.darkGray.cgColor)
+        context.setLineWidth(0.7)
+        var occupied: [CGRect] = []
+        for index in start...finish {
+            let target = Double(index) * step
+            guard let segment = (0..<(samples.count - 1)).first(where: {
+                let a = coordinates[$0], b = coordinates[$0 + 1]
+                return target >= min(a, b) && target <= max(a, b) && abs(b - a) > 0.0001
+            }) else { continue }
+            let fraction = (target - coordinates[segment]) / (coordinates[segment + 1] - coordinates[segment])
+            let position = samples[segment].0 + CGFloat(fraction) * (samples[segment + 1].0 - samples[segment].0)
+            let major = index % 5 == 0
+            let length: CGFloat = major ? 7 : 3
+            context.move(to: horizontal ? CGPoint(x: position, y: rulerWidth) : CGPoint(x: rulerWidth, y: position))
+            context.addLine(to: horizontal ? CGPoint(x: position, y: rulerWidth - length) : CGPoint(x: rulerWidth - length, y: position))
+            context.strokePath()
+            guard major else { continue }
+            let text = String(format: "%.0f", target * 100) as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular), .foregroundColor: UIColor.darkGray
+            ]
+            let size = text.size(withAttributes: attributes)
+            let frame = horizontal
+                ? CGRect(x: position - size.width / 2, y: 1, width: size.width, height: size.height)
+                : CGRect(x: 1, y: position - size.width / 2, width: size.height, height: size.width)
+            let strip = horizontal
+                ? CGRect(x: rulerWidth + 4, y: 0, width: bounds.width - rulerWidth - 8, height: rulerWidth)
+                : CGRect(x: 0, y: rulerWidth + 4, width: rulerWidth, height: bounds.height - rulerWidth - 8)
+            guard strip.contains(frame), !occupied.contains(where: { $0.intersects(frame.insetBy(dx: -4, dy: -4)) }) else { continue }
+            if horizontal {
+                text.draw(in: frame, withAttributes: attributes)
+            } else {
+                context.saveGState()
+                context.translateBy(x: 1, y: frame.maxY)
+                context.rotate(by: -.pi / 2)
+                text.draw(at: .zero, withAttributes: attributes)
+                context.restoreGState()
+            }
+            occupied.append(frame)
+        }
+    }
+
+}
+
+/// LiDAR로 인식한 벽의 공통 표시색.
+/// #17233D를 반투명으로 사용해 흰색 벽 대신 모든 공간 화면에서 동일하게 보이게 한다.
+private let roomWallNavy = UIColor(
+    red: 23.0 / 255.0,
+    green: 35.0 / 255.0,
+    blue: 61.0 / 255.0,
+    alpha: 0.72
+)
 
 /// 모든 공간 뷰어가 같은 카메라 조작 방식을 쓰도록 하는 공통 컨트롤러.
 /// 방 엔티티는 움직이지 않고 카메라만 원점을 중심으로 회전·기울기·줌을 변경한다.
@@ -126,7 +564,7 @@ struct RoomViewerView: View {
     var serverModels: [UUID: URL]? = nil
     var optimizedObjects: [OptimizedObject]? = nil
     var isTransparent: Bool = false
-    var wallColor: UIColor = .white
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     var furnitureTint: UIColor? = nil
     /// true면 기본 모드에서도 Apple이 구워낸 USDZ 대신, 벽/바닥/가구를 따로 그리는
@@ -201,7 +639,7 @@ struct RealityKitRoomView: UIViewRepresentable {
     var isTransparent: Bool = false
     /// true면 isTransparent와 무관하게 카탈로그/색상 커스터마이즈 가능한 렌더러 사용
     var useCatalogRenderer: Bool = false
-    var wallColor: UIColor = .white
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     var furnitureTint: UIColor? = nil
 
@@ -230,8 +668,34 @@ struct RealityKitRoomView: UIViewRepresentable {
         context.coordinator.roomAnchor = roomAnchor
         context.coordinator.arView = arView
 
+        let overlay = RoomGuideOverlay()
+        overlay.arView = arView
+        overlay.roomAnchor = roomAnchor
+        let coord = context.coordinator
+        overlay.items = { [weak coord, weak roomAnchor] in
+            guard let coord, let roomAnchor else { return [] }
+            return coord.guideObjects.map { item in
+                RoomGuideItem(id: item.id, title: item.title,
+                    worldPoint: roomAnchor.convert(position: item.worldPoint, to: nil), selected: false,
+                    color: roomAnchor.findEntity(named: "furniture_" + item.id)
+                        .flatMap { RoomGuideOverlay.furnitureColor(of: $0) } ?? item.color)
+            }
+        }
+        overlay.floorY = { capturedRoom.floors.first?.transform.columns.3.y ?? 0 }
+        overlay.frame = arView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        arView.addSubview(overlay)
+        coord.guideOverlay = overlay
+        coord.guideObjects = capturedRoom.objects.map { object in
+            let center = object.transform.columns.3.xyz
+            return RoomGuideItem(id: object.identifier.uuidString,
+                title: RoomGuideOverlay.furnitureName(category: String(describing: object.category), height: object.dimensions.y),
+                worldPoint: center + SIMD3(0, object.dimensions.y / 2 + 0.06, 0), selected: false,
+                color: furnitureTint ?? colorForCategory(object.category))
+        }
+
         if isTransparent || useCatalogRenderer {
-            Task { @MainActor in
+            coord.sceneTask = Task { @MainActor in
                 let opts = capturedRoom.objects.map { obj in
                     OptimizedObject(
                         identifier: obj.identifier,
@@ -243,7 +707,7 @@ struct RealityKitRoomView: UIViewRepresentable {
                 await loadOptimizedScene(capturedRoom, objects: opts, into: roomAnchor)
             }
         } else if let url = usdzURL {
-            Task { await loadUSDZ(url: url, into: roomAnchor) }
+            coord.sceneTask = Task { await loadUSDZ(url: url, into: roomAnchor) }
         } else {
             renderScene(capturedRoom, in: roomAnchor)
         }
@@ -258,11 +722,23 @@ struct RealityKitRoomView: UIViewRepresentable {
               !context.coordinator.hasAppliedOptimization else { return }
 
         context.coordinator.hasAppliedOptimization = true
-
-        Task { @MainActor in
+        context.coordinator.sceneTask?.cancel()
+        context.coordinator.guideObjects = optimizedObjects.compactMap { object in
+            guard let original = capturedRoom.objects.first(where: { $0.identifier == object.identifier }) else { return nil }
+            return RoomGuideItem(id: object.identifier.uuidString,
+                title: RoomGuideOverlay.furnitureName(category: object.category, height: original.dimensions.y),
+                worldPoint: object.center + SIMD3(0, original.dimensions.y / 2 + 0.06, 0), selected: false,
+                color: furnitureTint ?? colorForCategory(original.category))
+        }
+        context.coordinator.sceneTask = Task { @MainActor in
             roomAnchor.children.removeAll()
             await loadOptimizedScene(capturedRoom, objects: optimizedObjects, into: roomAnchor)
         }
+    }
+
+    static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
+        coordinator.sceneTask?.cancel()
+        coordinator.guideOverlay?.stop()
     }
 
     // MARK: - USDZ 로드
@@ -270,7 +746,9 @@ struct RealityKitRoomView: UIViewRepresentable {
     @MainActor
     private func loadUSDZ(url: URL, into anchor: AnchorEntity) async {
         do {
+            // This generated room file reuses its path for different scans; do not cache it by URL.
             let entity = try Entity.loadSync(contentsOf: url)
+            guard !Task.isCancelled else { return }
             anchor.addChild(entity)
             // Apple USDZ의 바닥 재질을 선택된 바닥 색으로 덮기
             for s in capturedRoom.floors {
@@ -293,8 +771,12 @@ struct RealityKitRoomView: UIViewRepresentable {
         renderSurfaces(room, in: anchor)
 
         let mp = try? CapturedRoom.ModelProvider.load()
+        let remoteModels = serverModels.map { Array($0.values) } ?? []
+        let prefetch = Task { await FurnitureAssetFiles.shared.prefetch(remoteModels) }
+        defer { prefetch.cancel() }
 
         for opt in objects {
+            guard !Task.isCancelled else { return }
             guard let original = room.objects.first(where: { $0.identifier == opt.identifier }) else { continue }
 
             var placed = false
@@ -303,7 +785,13 @@ struct RealityKitRoomView: UIViewRepresentable {
                 ?? (serverModels == nil ? (try? mp?.modelFileURL(for: original)) : nil)
             if let modelURL {
                 do {
-                    let model = try Entity.loadSync(contentsOf: modelURL)
+                    let model: Entity
+                    if modelURL.isFileURL {
+                        model = try await FurnitureModelTemplates.shared.loadLocal(modelURL)
+                    } else {
+                        model = try await FurnitureModelTemplates.shared.load(modelURL, fileExtension: "usdz")
+                    }
+                    guard !Task.isCancelled else { return }
 
                     // 모델 크기를 원본 dimensions에 맞게 스케일 조정
                     let bounds = model.visualBounds(relativeTo: model)
@@ -323,6 +811,7 @@ struct RealityKitRoomView: UIViewRepresentable {
                     } else if serverModels == nil {
                         applyPreviewColor(to: model, color: colorForCategory(original.category))
                     }
+                    model.name = "furniture_\(original.identifier.uuidString)"
                     anchor.addChild(model)
                     placed = true
                     print("✅ 최적화 모델 배치: \(modelURL.lastPathComponent)")
@@ -345,6 +834,7 @@ struct RealityKitRoomView: UIViewRepresentable {
                 )
                 entity.position = opt.center
                 entity.orientation = opt.rotation
+                entity.name = "furniture_\(original.identifier.uuidString)"
                 anchor.addChild(entity)
             }
         }
@@ -353,7 +843,9 @@ struct RealityKitRoomView: UIViewRepresentable {
     // MARK: - 씬 렌더링 (named entities - 최적화 애니메이션용)
 
     private func renderSurfaces(_ room: CapturedRoom, in anchor: AnchorEntity) {
-        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.45 : 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(
+            isTransparent ? 0.58 : wallColor.cgColor.alpha
+        )
         for wall in room.walls {
             let openings = capturedRoomOpenings(wall: wall, doors: room.doors, windows: room.windows)
             wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
@@ -441,6 +933,9 @@ struct RealityKitRoomView: UIViewRepresentable {
         weak var arView: ARView?
         var roomAnchor: AnchorEntity?
         var hasAppliedOptimization: Bool = false
+        var sceneTask: Task<Void, Never>?
+        var guideOverlay: RoomGuideOverlay?
+        var guideObjects: [RoomGuideItem] = []
         let orbitCamera = RoomOrbitCamera()
         private var lastRotation: Float = 0
 
@@ -460,6 +955,15 @@ struct RealityKitRoomView: UIViewRepresentable {
             guard let arView else { return }
             orbitCamera.pan(g.translation(in: arView))
             g.setTranslation(.zero, in: arView)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var view = touch.view
+            while let current = view {
+                if current is UIControl { return false }
+                view = current.superview
+            }
+            return true
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
@@ -536,8 +1040,10 @@ struct JsonRealityKitView: UIViewRepresentable {
     @MainActor
     private func buildScene(into anchor: AnchorEntity) async {
         // 구조물
-        // 벽: 반투명 흰색, 문/창문 스킵 → 자연 간극
-        for s in roomData.walls  ?? [] { anchor.addChild(makeSurface(s, color: UIColor(white: 1.0, alpha: 0.45), depth: 0.04)) }
+        // 벽: #17233D 반투명 네이비, 문/창문 스킵 → 자연 간극
+        for s in roomData.walls  ?? [] {
+            anchor.addChild(makeSurface(s, color: roomWallNavy.withAlphaComponent(0.58), depth: 0.04))
+        }
         for s in roomData.floors ?? [] { anchor.addChild(makeSurface(s, color: UIColor.white, depth: 0.01)) }
 
         // 가구
@@ -807,14 +1313,18 @@ struct UsdzRealityKitView: UIViewRepresentable {
 // 선택하면 아래에는 시야를 가리지 않는 작은 회전 액션 바만 나타난다.
 
 final class FurnitureNudgeHandle: UIView {
-    /// 양수면 시계 방향, 음수면 반시계 방향 회전.
+    /// 방의 Y축을 기준으로 한 회전 각도(라디안).
     var onRotate: ((Float) -> Void)?
 
     private let rotateLeftButton = UIButton(type: .system)
     private let instructionLabel = UILabel()
     private let rotateRightButton = UIButton(type: .system)
 
-    override init(frame: CGRect) {
+    private let showsAngleLabels: Bool
+
+    init(showsAngleLabels: Bool = false) {
+        self.showsAngleLabels = showsAngleLabels
+        let frame = CGRect.zero
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = UIColor.black.withAlphaComponent(0.40)
@@ -822,12 +1332,14 @@ final class FurnitureNudgeHandle: UIView {
         layer.borderWidth = 1
         layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
 
+
         configureRotateButton(rotateLeftButton, symbol: "rotate.left", label: "왼쪽으로 90도 회전")
         configureRotateButton(rotateRightButton, symbol: "rotate.right", label: "오른쪽으로 90도 회전")
         rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
         rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
 
-        instructionLabel.text = "선택됨 · 끌어서 이동"
+        instructionLabel.text = showsAngleLabels ? "끌어서 이동 · 90°" : "선택됨 · 끌어서 이동"
+        instructionLabel.numberOfLines = 1
         instructionLabel.textColor = .white
         instructionLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         instructionLabel.textAlignment = .center
@@ -866,10 +1378,14 @@ final class FurnitureNudgeHandle: UIView {
         button.layer.cornerRadius = 22
         button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = label
+        if showsAngleLabels {
+            button.setImage(UIImage(systemName: symbol == "rotate.left" ? "arrow.counterclockwise" : "arrow.clockwise",
+                                    withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
+        }
     }
 
-    @objc private func rotateLeftTapped()  { onRotate?(-.pi / 2) }
-    @objc private func rotateRightTapped() { onRotate?(.pi / 2) }
+    @objc private func rotateLeftTapped()  { onRotate?(showsAngleLabels ? .pi / 2 : -.pi / 2) }
+    @objc private func rotateRightTapped() { onRotate?(showsAngleLabels ? -.pi / 2 : .pi / 2) }
 }
 
 // MARK: - FurnitureRealityKitView (rooms API 버전 상세 기반 3D 뷰어)
@@ -883,6 +1399,35 @@ struct FurniturePoseEdit: Encodable {
     let identifier: String
     let center: [Float]
     let rotation: [Float]
+    let dimensions: [Float]?
+    let category: String?
+    let colorHex: String?
+    let operation: String?
+    let displayName: String?
+
+    init(identifier: String,
+         center: [Float],
+         rotation: [Float],
+         dimensions: [Float]? = nil,
+         category: String? = nil,
+         colorHex: String? = nil,
+         operation: String? = nil,
+         displayName: String? = nil) {
+        self.identifier = identifier
+        self.center = center
+        self.rotation = rotation
+        self.dimensions = dimensions
+        self.category = category
+        self.colorHex = colorHex
+        self.operation = operation
+        self.displayName = displayName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case identifier, center, rotation, dimensions, category, operation
+        case colorHex = "color_hex"
+        case displayName = "display_name"
+    }
 }
 
 /// 3D 뷰 안에서 일어난 편집을 화면(SwiftUI) 쪽에서 꺼내올 수 있게 연결해주는 핸들.
@@ -893,21 +1438,39 @@ final class FurnitureEditSession: ObservableObject {
     fileprivate var cancel: (() -> Void)?
     fileprivate var restoreVisibility: (() -> Void)?
     fileprivate var applyHiddenIdentifiers: ((Set<String>) -> Void)?
+    fileprivate var addMeasured: ((MeasuredFurnitureDraft) -> Bool)?
     func pendingEdits() -> [FurniturePoseEdit] { collect?() ?? [] }
     func cancelPendingEdits() { cancel?() }
     func restoreFurnitureVisibility() { restoreVisibility?() }
+    @discardableResult
+    func addMeasuredFurniture(_ draft: MeasuredFurnitureDraft) -> Bool { addMeasured?(draft) ?? false }
     func setHiddenFurnitureIdentifiers(_ identifiers: Set<String>) {
         applyHiddenIdentifiers?(identifiers)
     }
 }
 
+struct FurnitureColorLegendItem: Identifiable {
+    let id: String
+    let title: String
+    let color: UIColor
+}
+
 struct FurnitureRealityKitView: UIViewRepresentable {
     let detail: RoomVersionDetail
+    /// Reuse the challenge's starting walls/floor without replacing submitted furniture positions.
+    var referenceDetail: RoomVersionDetail? = nil
     var capturedRoom: CapturedRoom? = nil   // B안: 제공 시 로컬 USDZ로 방 shell 렌더링
     var isTransparent: Bool = false         // 투명 모드: 반투명 벽 박스
     var allowsLocalFallback: Bool = true
     var onAssetFailure: ((String) -> Void)? = nil
-    var wallColor: UIColor = .white
+    var onSceneReady: (() -> Void)? = nil
+    var onColorLegendReady: (([FurnitureColorLegendItem]) -> Void)? = nil
+    /// General V-O viewer only. Challenge keeps its existing presentation and loading path.
+    var showsRoomGuides: Bool = false
+    var showsFurnitureNames: Bool = false
+    var showsFloorRuler: Bool = false
+    var prefersInlineObjects: Bool = false
+    var wallColor: UIColor = roomWallNavy
     var floorColor: UIColor = .white
     /// 카탈로그 모델/박스 폴백 가구에 적용할 색상 (nil이면 원래 색 유지). usdc_url로 로드되는
     /// 사용자 본인의 AI 생성 가구(사진 기반)에는 적용하지 않음 — 실제 촬영 결과와 어긋나 보일 수 있어서.
@@ -968,6 +1531,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         editSession?.applyHiddenIdentifiers = { [weak coord] identifiers in
             coord?.setHiddenFurnitureIdentifiers(identifiers)
         }
+        editSession?.addMeasured = { [weak coord] draft in
+            coord?.addMeasuredFurniture(draft) ?? false
+        }
         coord.sceneTask = Task { @MainActor in
             await buildScene(into: roomAnchor, coordinator: coord)
         }
@@ -1003,7 +1569,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         arView.addGestureRecognizer(tapGesture)
 
         // 가구 편집 도구 — 방과 가구를 가리지 않도록 선택됐을 때 화면 아래 중앙에 나타난다.
-        let handle = FurnitureNudgeHandle()
+        if showsRoomGuides {
+            let overlay = RoomGuideOverlay()
+            overlay.showsNames = showsFurnitureNames
+            overlay.showsRuler = showsFloorRuler
+            overlay.arView = arView
+            overlay.roomAnchor = roomAnchor
+            overlay.items = { [weak coord] in coord?.guideItems() ?? [] }
+            overlay.floorY = { [weak coord] in coord?.floorTransform?.columns.3.y ?? 0 }
+            overlay.frame = arView.bounds
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            arView.addSubview(overlay)
+            coord.guideOverlay = overlay
+        }
+        let handle = FurnitureNudgeHandle(showsAngleLabels: showsRoomGuides)
         handle.isHidden = true
         arView.addSubview(handle)
         NSLayoutConstraint.activate([
@@ -1018,6 +1597,12 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
     func updateUIView(_ uiView: ARView, context: Context) {
         let coordinator = context.coordinator
+        if coordinator.guideOverlay?.showsNames != showsFurnitureNames {
+            coordinator.guideOverlay?.showsNames = showsFurnitureNames
+        }
+        if coordinator.guideOverlay?.showsRuler != showsFloorRuler {
+            coordinator.guideOverlay?.showsRuler = showsFloorRuler
+        }
         if coordinator.editMode != editMode {
             coordinator.setEditMode(editMode)
         }
@@ -1030,10 +1615,12 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
         coordinator.sceneTask?.cancel()
+        coordinator.guideOverlay?.stop()
         coordinator.deselect()
         coordinator.entitiesByIdentifier.removeAll()
         coordinator.identifierByEntity.removeAll()
         coordinator.poseBaseline.removeAll()
+        coordinator.newFurnitureIdentifiers.removeAll()
         coordinator.arView = nil
     }
 
@@ -1046,7 +1633,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     @MainActor
     private func buildScene(into anchor: AnchorEntity, coordinator: Coordinator) async {
 
-        let effectiveWallColor = wallColor.withAlphaComponent(isTransparent ? 0.35 : 1.0)
+        let effectiveWallColor = wallColor.withAlphaComponent(
+            isTransparent ? 0.58 : wallColor.cgColor.alpha
+        )
 
         // ── capturedRoom이 있으면 방 구조 먼저 렌더링 (JSON 결과 기다리지 않음) ──
         if let room = capturedRoom {
@@ -1066,59 +1655,63 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             adjustCamera(anchor: anchor, coordinator: coordinator, positions: allPos)
         }
 
-        // ── JSON 다운로드 ──────────────────────────────────────────────────────
-        guard let dataURLString = detail.effectiveDataUrl,
-              let dataURL = URL(string: dataURLString) else {
-            onAssetFailure?("서버 원본 공간의 배치 파일이 없습니다.")
-            print("⚠️ layout_json_url/data_url 없음 – 방 구조만 표시")
+        // Use the saved submission's inline coordinates, even if its JSON URL is the start layout.
+        var downloaded: RoomDataPayload?
+        if let value = detail.effectiveDataUrl, let url = URL(string: value) {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                downloaded = try JSONDecoder().decode(RoomDataPayload.self, from: data)
+            } catch {
+                guard detail.iosObjects != nil || detail.jsonData != nil else {
+                    onAssetFailure?("서버 공간 데이터를 불러오지 못했습니다.")
+                    return
+                }
+            }
+        }
+        var referencePayload = referenceDetail?.jsonData
+        if referencePayload?.walls?.isEmpty != false,
+           let value = referenceDetail?.effectiveDataUrl, let url = URL(string: value) {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                referencePayload = try JSONDecoder().decode(RoomDataPayload.self, from: data)
+            } catch {
+                // The submitted room can still use its own structure or the shell fallback below.
+            }
+        }
+        guard !Task.isCancelled else { return }
+        let structure = referencePayload?.walls?.isEmpty == false ? referencePayload : nil
+        guard let payload = detail.displayPayload(base: downloaded, preferInlineObjects: prefersInlineObjects,
+                                                structure: structure) else {
+            onAssetFailure?("서버 공간의 배치 데이터가 없습니다.")
             return
         }
 
-        let payload: RoomDataPayload
-        do {
-            let (jsonData, _) = try await URLSession.shared.data(from: dataURL)
-            if let raw = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let firstObj = (raw["objects"] as? [[String: Any]])?.first {
-                print("🔍 objects[0] 전체: \(firstObj)")
-            }
-            payload = try JSONDecoder().decode(RoomDataPayload.self, from: jsonData)
-            print("✅ JSON 파싱 완료: 오브젝트 \(payload.objects.count)개")
-        } catch {
-            onAssetFailure?("서버 공간 데이터를 불러오지 못했습니다.")
-            print("❌ data_url 파싱 실패: \(error) – 방 구조만 표시")
-            return
+        var shellBounds: BoundingBox?
+        if capturedRoom == nil, payload.walls?.isEmpty != false,
+           let value = detail.usdzEmptyUrl ?? detail.roomShellUrl, let url = URL(string: value) {
+            do {
+                let ext = url.pathExtension.lowercased() == "usdz" ? "usdz" : "usdc"
+                let shell = try await FurnitureModelTemplates.shared.load(url, fileExtension: ext)
+                guard !Task.isCancelled else { return }
+                if isTransparent {
+                    // An imported empty-room mesh can otherwise retain opaque authored walls.
+                    if #available(iOS 18.0, *) {
+                        shell.components.set(OpacityComponent(opacity: 0.58))
+                    } else {
+                        applyTint(to: shell, color: effectiveWallColor)
+                    }
+                }
+                anchor.addChild(shell)
+                shellBounds = shell.visualBounds(relativeTo: anchor)
+            } catch { onAssetFailure?("방 구조를 불러오지 못했어요. 다시 불러와 주세요.") }
         }
 
-        // 🔧 디버그: capturedRoom 없이(JSON만으로) 그리는 경로에서 벽/가구 위치가 실제로
-        // 어떻게 어긋나는지 확인하기 위한 임시 로그. 문제 재현되면 이 로그로 벽 좌표 대비
-        // 가구 좌표가 room 밖/다른 벽 쪽에 있는지 바로 확인 가능.
-        if capturedRoom == nil {
-            print("🪵 [디버그] dataURL = \(dataURLString)")
-            for (i, wall) in (payload.walls ?? []).enumerated() {
-                if let t = wall.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] wall[\(i)] center=(\(c.x), \(c.y), \(c.z)) dims=\(wall.dimensions)")
-                } else {
-                    print("🪵 [디버그] wall[\(i)] simdTransform 디코딩 실패, dims=\(wall.dimensions)")
-                }
-            }
-            for floor in payload.floors ?? [] {
-                if let t = floor.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] floor center=(\(c.x), \(c.y), \(c.z)) dims=\(floor.dimensions)")
-                }
-            }
-            for obj in payload.objects {
-                if let t = obj.simdTransform {
-                    let c = t.columns.3
-                    print("🪵 [디버그] object id=\(obj.identifier) cat=\(obj.category ?? "?") transform.center=(\(c.x), \(c.y), \(c.z)) json.center=\(obj.center ?? [])")
-                }
-            }
-        }
-
-        // 배치 클램프 기준 벽 목록 — editMode가 나중에 켜질 수도 있으니 항상 미리 준비해둔다.
-        // 바닥 사각형 근사 대신 실제 렌더링되는 벽 평면을 그대로 써서 방이 직사각형이 아니어도
-        // (L자 등) 정확하게 막힌다. capturedRoom 셸이 있으면 그쪽 우선.
         let rawWalls: [(transform: simd_float4x4, halfWidth: Float)]
         if let room = capturedRoom, !room.walls.isEmpty {
             rawWalls = room.walls.map { ($0.transform, $0.dimensions.x / 2) }
@@ -1144,6 +1737,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         // ── capturedRoom이 없을 때만 JSON으로 방 구조 렌더링 ──────────────────
         if capturedRoom == nil {
             var allPos: [SIMD3<Float>] = []
+            if let shellBounds { allPos += [shellBounds.min, shellBounds.max] }
             for w in payload.walls   ?? [] { if let t = w.simdTransform { allPos.append(t.columns.3.xyz) } }
             for f in payload.floors  ?? [] { if let t = f.simdTransform { allPos.append(t.columns.3.xyz) } }
             for o in payload.objects {
@@ -1181,8 +1775,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             uniquingKeysWith: { _, latest in latest }
         )
 
+        // Start at most four downloads at once; identical catalog assets share one request.
+        let prefetchTask: Task<Void, Never>? = showsRoomGuides ? Task {
+            let urls = payload.objects.compactMap { object -> URL? in
+                let fresh = freshObjectsById[object.identifier.lowercased()]
+                return (fresh?.usdzUrl ?? detail.catalogUSDZURL(modelKey: fresh?.modelKey ?? object.modelKey,
+                    filename: fresh?.modelFileName ?? object.modelFileName) ?? object.usdzUrl).flatMap(URL.init(string:))
+            }
+            await FurnitureAssetFiles.shared.prefetch(urls)
+        } : nil
+        defer { prefetchTask?.cancel() }
+
         // ── 가구 배치 ──────────────────────────────────────────────────────────
         for obj in payload.objects {
+            guard !Task.isCancelled else { return }
             guard let matrix = obj.simdTransform else { continue }
             let worldPos = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
             let freshObj = freshObjectsById[obj.identifier.lowercased()]
@@ -1197,25 +1803,31 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                                        filename: freshObj?.modelFileName ?? obj.modelFileName), "usdz"),
                 (obj.usdzUrl, "usdz"),
                 (freshObj?.usdcUrl, "usdc"),
-                (obj.usdcUrl, "usdc")
+                (obj.usdcUrl, "usdc"),
+                ((freshObj?.modelKey ?? obj.modelKey).flatMap { detail.modelUrls?[$0] }, "usdc")
             ]
             var attempted = Set<String>()
             for (candidate, ext) in candidates {
                 guard !placed, let value = candidate, !value.isEmpty,
                       attempted.insert(value).inserted, let remoteURL = URL(string: value) else { continue }
                 do {
-                    var request = URLRequest(url: remoteURL)
-                    request.cachePolicy = .reloadIgnoringLocalCacheData
-                    let (tmpURL, response) = try await URLSession.shared.download(for: request)
-                    guard let http = response as? HTTPURLResponse,
-                          (200..<300).contains(http.statusCode) else {
-                        throw URLError(.badServerResponse)
+                    let loaded: Entity
+                    if showsRoomGuides {
+                        loaded = try await FurnitureModelTemplates.shared.load(remoteURL, fileExtension: ext)
+                    } else {
+                        var request = URLRequest(url: remoteURL)
+                        request.cachePolicy = .reloadIgnoringLocalCacheData
+                        let (tmpURL, response) = try await URLSession.shared.download(for: request)
+                        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                            throw URLError(.badServerResponse)
+                        }
+                        let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                            .appendingPathComponent(UUID().uuidString + "." + ext)
+                        try FileManager.default.moveItem(at: tmpURL, to: destURL)
+                        defer { try? FileManager.default.removeItem(at: destURL) }
+                        loaded = try Entity.loadSync(contentsOf: destURL)
                     }
-                    let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                        .appendingPathComponent(UUID().uuidString + "." + ext)
-                    try FileManager.default.moveItem(at: tmpURL, to: destURL)
-                    defer { try? FileManager.default.removeItem(at: destURL) }
-                    let loaded = try Entity.loadSync(contentsOf: destURL)
+                    guard !Task.isCancelled else { return }
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
                     anchor.addChild(loaded)
                     placed = true
@@ -1231,7 +1843,13 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             if !placed, allowsLocalFallback, let fileName = freshObj?.modelKey ?? obj.modelKey ?? freshObj?.modelFileName ?? obj.modelFileName,
                let localURL = findCatalogModel(named: fileName) {
                 do {
-                    let loaded = try Entity.loadSync(contentsOf: localURL)
+                    let loaded: Entity
+                    if showsRoomGuides {
+                        loaded = try await FurnitureModelTemplates.shared.loadLocal(localURL)
+                    } else {
+                        loaded = try Entity.loadSync(contentsOf: localURL)
+                    }
+                    guard !Task.isCancelled else { return }
                     applyTransform(to: loaded, matrix: matrix, worldPos: worldPos, obj: obj)
                     if let furnitureTint {
                         applyTint(to: loaded, color: furnitureTint)
@@ -1267,6 +1885,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 placedEntity.name = "furniture_\(obj.identifier)"
                 placedEntity.generateCollisionShapes(recursive: true)
                 // AI 배치 상담의 가구 제외 시뮬레이션이 나중에 켜고 끌 수 있도록 식별자로 등록
+                coordinator.guideColors[obj.identifier] = representativeColor(of: placedEntity) ?? colorForCategory(obj.category ?? "")
                 coordinator.entitiesByIdentifier[obj.identifier] = placedEntity
                 coordinator.identifierByEntity[ObjectIdentifier(placedEntity)] = obj.identifier
                 // 편집 저장 때 "얼마나 움직였는지" 비교할 기준값. applyTransform이 모델 중심을
@@ -1284,12 +1903,56 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     center: worldPos,
                     yaw: Coordinator.serverYaw(of: placedEntity.orientation),
                     transform: placedEntity.transform,
-                    dimensions: collisionDimensions
+                    dimensions: collisionDimensions,
+                    isNew: false,
+                    colorHex: obj.colorHex,
+                    category: obj.category,
+                    displayName: obj.displayName
                 )
                 // Preserve server coordinates on load. Wall clamping belongs to
                 // explicit user edits; independently pushing objects creates overlaps.
             }
         }
+        guard !Task.isCancelled else { return }
+        coordinator.captureInitialFurnitureOverlaps()
+        if let onColorLegendReady {
+            var seen = Set<String>()
+            let items = payload.objects.compactMap { object -> FurnitureColorLegendItem? in
+                guard let entity = coordinator.entitiesByIdentifier[object.identifier] else { return nil }
+                let category = (object.category ?? "").lowercased()
+                let color = representativeColor(of: entity) ?? colorForCategory(category)
+                var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, opacity: CGFloat = 0
+                color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &opacity)
+                let isYellowStorage = (0.10...0.19).contains(hue) && saturation > 0.35 && brightness > 0.4
+                let title: String
+                switch category {
+                case "bed": title = "침대"
+                case "table": title = "책상·테이블"
+                case "chair": title = "의자"
+                case "sofa": title = "소파"
+                case "storage": title = isYellowStorage ? "서랍장" : "옷장·수납장"
+                case "television": title = "TV"
+                case "refrigerator": title = "냉장고"
+                case "washerdryer": title = "세탁기"
+                default: title = "기타 가구"
+                }
+                var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+                color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+                let key = "\(title)-\(Int(red * 255))-\(Int(green * 255))-\(Int(blue * 255))"
+                guard seen.insert(key).inserted else { return nil }
+                return FurnitureColorLegendItem(id: key, title: title, color: color)
+            }
+            onColorLegendReady(items)
+        }
+        if coordinator.poseBaseline.isEmpty {
+            onAssetFailure?("편집할 가구가 없어요. 운영자에게 이벤트 배치를 확인해 달라고 알려주세요.")
+        } else {
+            onSceneReady?()
+        }
+    }
+
+    private func representativeColor(of entity: Entity) -> UIColor? {
+        RoomGuideOverlay.furnitureColor(of: entity)
     }
 
     // MARK: - OBB 충돌 해소
@@ -1532,7 +2195,8 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     /// 카테고리별 색상 박스 (배경색과 겹치지 않는 뚜렷한 색상). furnitureTint 있으면 그걸로 통일.
     private func makeFallbackBox(for obj: RoomDataPayload.RoomObject) -> ModelEntity {
         var mat = SimpleMaterial()
-        mat.color = .init(tint: furnitureTint ?? colorForCategory(obj.category ?? ""))
+        let savedColor = obj.colorHex.flatMap(UIColor.voColor(hex:))
+        mat.color = .init(tint: furnitureTint ?? savedColor ?? colorForCategory(obj.category ?? ""))
         mat.roughness = 0.9
         let raw = obj.dimensions ?? []
         let dims = (0..<3).map { index -> Float in
@@ -1583,8 +2247,30 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             let transform: Transform
             /// 서버가 전달한 RoomPlan OBB 치수. 렌더 모델의 숨은 여백과 무관한 충돌 기준이다.
             let dimensions: SIMD3<Float>
+            let isNew: Bool
+            let colorHex: String?
+            let category: String?
+            var displayName: String? = nil
         }
         var poseBaseline: [String: PoseBaseline] = [:]
+        var newFurnitureIdentifiers: Set<String> = []
+        private var collisionPolicy = FurnitureCollisionPolicy()
+
+        func captureInitialFurnitureOverlaps() {
+            collisionPolicy = FurnitureCollisionPolicy()
+            let identifiers = entitiesByIdentifier.keys.sorted()
+            for (index, firstID) in identifiers.enumerated() {
+                guard let first = entitiesByIdentifier[firstID], let firstBase = poseBaseline[firstID],
+                      !firstBase.isNew else { continue }
+                for secondID in identifiers.dropFirst(index + 1) {
+                    guard let second = entitiesByIdentifier[secondID], let secondBase = poseBaseline[secondID],
+                          !secondBase.isNew, let penetration = furniturePenetration(first, second) else { continue }
+                    collisionPolicy.recordInitialOverlap(firstID, category: firstBase.category,
+                                                         secondID, category: secondBase.category,
+                                                         penetration: penetration)
+                }
+            }
+        }
 
         /// 서버 JSON의 회전 표기(transform 첫 열이 [cos, 0, sin])에 맞춘 yaw 값
         static func serverYaw(of orientation: simd_quatf) -> Float {
@@ -1601,11 +2287,16 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let yaw = Self.serverYaw(of: entity.orientation)
                 let moved = length(SIMD2(center.x - base.center.x, center.z - base.center.z)) > 0.005
                 let turned = abs(atan2(sin(yaw - base.yaw), cos(yaw - base.yaw))) > 0.01
-                guard moved || turned else { continue }
+                guard moved || turned || base.isNew else { continue }
                 edits.append(FurniturePoseEdit(
                     identifier: identifier,
                     center: [center.x, base.center.y, center.z],
-                    rotation: [0, yaw, 0]
+                    rotation: [0, yaw, 0],
+                    dimensions: base.isNew ? [base.dimensions.x, base.dimensions.y, base.dimensions.z] : nil,
+                    category: base.isNew ? base.category : nil,
+                    colorHex: base.isNew ? base.colorHex : nil,
+                    operation: base.isNew ? "create" : nil,
+                    displayName: base.isNew ? base.displayName : nil
                 ))
             }
             return edits
@@ -1613,12 +2304,24 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         func resetFurnitureToBaseline() {
             deselect()
+            let addedIdentifiers = newFurnitureIdentifiers
             for (identifier, entity) in entitiesByIdentifier {
+                if addedIdentifiers.contains(identifier) {
+                    entity.removeFromParent()
+                    continue
+                }
                 if let baseline = poseBaseline[identifier] {
                     entity.transform = baseline.transform
                 }
                 entity.isEnabled = true
             }
+            for identifier in addedIdentifiers {
+                entitiesByIdentifier[identifier] = nil
+                poseBaseline[identifier] = nil
+                guideColors[identifier] = nil
+            }
+            identifierByEntity = identifierByEntity.filter { !addedIdentifiers.contains($0.value) }
+            newFurnitureIdentifiers.removeAll()
         }
 
         func showAllFurniture() {
@@ -1630,8 +2333,115 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 entity.isEnabled = !hiddenIdentifiers.contains(identifier)
             }
         }
+
+        /// 별도 LiDAR 측정 화면에서 얻은 치수로 새 OBB 가구를 방에 넣는다. 스캔한 실제 공간과
+        /// 저장된 방은 서로 다른 AR 좌표계이므로, 측정 화면의 위치는 쓰지 않고 방 안의 비어 있는
+        /// 지점을 찾아 배치한다. 이후 사용자가 기존 편집 방식으로 정확한 위치를 정한다.
+        func addMeasuredFurniture(_ draft: MeasuredFurnitureDraft) -> Bool {
+            guard let roomAnchor,
+                  draft.dimensions.x.isFinite, draft.dimensions.y.isFinite, draft.dimensions.z.isFinite,
+                  draft.dimensions.x > 0.02, draft.dimensions.y > 0.02, draft.dimensions.z > 0.02 else {
+                return false
+            }
+
+            deselect()
+            var material = SimpleMaterial()
+            material.color = .init(tint: UIColor.voColor(hex: draft.colorHex) ?? .systemBrown)
+            material.roughness = 0.88
+            let entity = ModelEntity(
+                mesh: .generateBox(size: draft.dimensions, cornerRadius: 0.035),
+                materials: [material]
+            )
+            entity.name = "furniture_\(draft.id)"
+            entity.generateCollisionShapes(recursive: true)
+            roomAnchor.addChild(entity)
+
+            let floorY = floorTransform?.columns.3.y ?? 0
+            let provisionalCenter = SIMD3<Float>(0, floorY + draft.dimensions.y / 2, 0)
+            entity.position = provisionalCenter
+            entitiesByIdentifier[draft.id] = entity
+            identifierByEntity[ObjectIdentifier(entity)] = draft.id
+            newFurnitureIdentifiers.insert(draft.id)
+            poseBaseline[draft.id] = PoseBaseline(
+                centerOffset: .zero,
+                center: provisionalCenter,
+                yaw: 0,
+                transform: entity.transform,
+                dimensions: draft.dimensions,
+                isNew: true,
+                colorHex: draft.colorHex,
+                category: "custom",
+                displayName: draft.displayName
+            )
+
+            // 바닥 중앙부터 바깥쪽으로 탐색해 다른 가구와 겹치지 않는 첫 지점을 사용한다.
+            var candidates: [SIMD3<Float>] = []
+            if let floorTransform, let halfExtent = floorHalfExtent {
+                let usableX = max(0, halfExtent.x - draft.dimensions.x / 2 - 0.05)
+                let usableY = max(0, halfExtent.y - draft.dimensions.z / 2 - 0.05)
+                let step: Float = 0.35
+                var x = -usableX
+                while x <= usableX + 0.001 {
+                    var y = -usableY
+                    while y <= usableY + 0.001 {
+                        let point = floorTransform * SIMD4<Float>(x, y, 0, 1)
+                        candidates.append(SIMD3(point.x, floorY + draft.dimensions.y / 2, point.z))
+                        y += step
+                    }
+                    x += step
+                }
+                candidates.sort {
+                    let center = floorTransform.columns.3
+                    let lhs = SIMD2($0.x - center.x, $0.z - center.z)
+                    let rhs = SIMD2($1.x - center.x, $1.z - center.z)
+                    return length_squared(lhs) < length_squared(rhs)
+                }
+            } else {
+                candidates = [provisionalCenter]
+            }
+
+            var chosen = provisionalCenter
+            for candidate in candidates {
+                entity.position = candidate
+                clampEntityToWalls(entity)
+                if FurnitureCollisionPolicy.accepts(previous: [:], proposed: furnitureCollisionScores(for: entity)) {
+                    chosen = entity.position(relativeTo: roomAnchor)
+                    break
+                }
+            }
+            entity.position = chosen
+            poseBaseline[draft.id] = PoseBaseline(
+                centerOffset: .zero,
+                center: chosen,
+                yaw: 0,
+                transform: entity.transform,
+                dimensions: draft.dimensions,
+                isNew: true,
+                colorHex: draft.colorHex,
+                category: "custom",
+                displayName: draft.displayName
+            )
+            select(entity)
+            return true
+        }
         /// 편집 모드에서 선택된 가구를 옮기는 오른쪽 핸들바 — 선택 여부에 따라 보이기/숨기기
         var nudgeHandle: FurnitureNudgeHandle?
+        var guideOverlay: RoomGuideOverlay?
+        var guideColors: [String: UIColor] = [:]
+
+        func guideItems() -> [RoomGuideItem] {
+            guard let roomAnchor else { return [] }
+            return entitiesByIdentifier.compactMap { identifier, entity in
+                guard entity.isEnabled, let baseline = poseBaseline[identifier] else { return nil }
+                let center = entity.position(relativeTo: roomAnchor) + entity.orientation.act(baseline.centerOffset)
+                let point = center + SIMD3<Float>(0, baseline.dimensions.y / 2 + 0.06, 0)
+                return RoomGuideItem(id: identifier,
+                    title: baseline.displayName ?? RoomGuideOverlay.furnitureName(category: baseline.category ?? "", height: baseline.dimensions.y),
+                    worldPoint: roomAnchor.convert(position: point, to: nil), selected: entity === selectedEntity,
+                    sizeText: String(format: "%.0f × %.0f cm", baseline.dimensions.x * 100, baseline.dimensions.z * 100),
+                    color: guideColors[identifier] ?? baseline.colorHex.flatMap(UIColor.voColor(hex:)) ?? .systemGray)
+            }
+        }
 
         /// 벽 클램프의 2차 안전망 — 바닥 전체 사각형 (벽 구간 사이 틈으로 빠져나가는 극단적인 경우 대비)
         var floorTransform: simd_float4x4?
@@ -1734,13 +2544,19 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         private var dragOffsetXZ = SIMD2<Float>.zero
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
+            // Two-finger furniture rotation must not also zoom the camera.
+            guard !editMode || selectedEntity == nil else { return }
             if g.state == .began { orbitCamera.pinchBegan() }
             orbitCamera.pinch(scale: g.scale)
         }
 
-        /// 한 손가락은 가구 이동, 두 손가락 드래그는 카메라 시점 변경으로 분리한다.
+        /// 가구 선택 중 두 손가락은 가구 회전에만 사용한다. 선택을 해제하면 시점을 조절한다.
         @objc func handleCameraPan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
+            guard !editMode || selectedEntity == nil else {
+                g.setTranslation(.zero, in: arView)
+                return
+            }
             orbitCamera.pan(g.translation(in: arView))
             g.setTranslation(.zero, in: arView)
         }
@@ -1768,11 +2584,11 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             if editMode {
                 guard let selectedEntity else { return }
                 let originalTransform = selectedEntity.transform
-                let originalCollision = furnitureCollisionScore(for: selectedEntity)
+                let originalCollision = furnitureCollisionScores(for: selectedEntity)
                 selectedEntity.orientation *= simd_quatf(angle: -delta, axis: [0, 1, 0])
                 clampEntityToWalls(selectedEntity)
                 if !isAcceptableCollisionChange(from: originalCollision,
-                                                to: furnitureCollisionScore(for: selectedEntity)) {
+                                                to: furnitureCollisionScores(for: selectedEntity)) {
                     selectedEntity.transform = originalTransform
                 }
                 updateSelectionIndicatorTransform()
@@ -1845,11 +2661,11 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         func rotateSelectedEntity(by angle: Float) {
             guard let selectedEntity else { return }
             let originalTransform = selectedEntity.transform
-            let originalCollision = furnitureCollisionScore(for: selectedEntity)
+            let originalCollision = furnitureCollisionScores(for: selectedEntity)
             selectedEntity.orientation *= simd_quatf(angle: angle, axis: [0, 1, 0])
             clampEntityToWalls(selectedEntity)
             if !isAcceptableCollisionChange(from: originalCollision,
-                                            to: furnitureCollisionScore(for: selectedEntity)) {
+                                            to: furnitureCollisionScores(for: selectedEntity)) {
                 selectedEntity.transform = originalTransform
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
             }
@@ -1884,6 +2700,15 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         /// 무시해서 방과 카메라가 움직이지 않으며, 일반 보기일 때만 기존 방 회전을 허용한다.
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let arView else { return }
+            // Adding a second finger cancels the one-finger drag. Do not apply
+            // its shifted touch centroid as one final furniture/camera movement.
+            if g.numberOfTouches > 1 || g.state == .cancelled || g.state == .failed {
+                panTarget = .none
+                dragPlaneY = nil
+                dragOffsetXZ = .zero
+                g.setTranslation(.zero, in: arView)
+                return
+            }
             if g.state == .began {
                 if editMode,
                    let hit = furnitureRoot(from: arView.entity(at: g.location(in: arView))) {
@@ -1945,7 +2770,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             defer { updateSelectionIndicatorTransform() }
             let originalTransform = entity.transform
             let originalWorldPosition = entity.position(relativeTo: nil)
-            let originalCollision = furnitureCollisionScore(for: entity)
+            let originalCollision = furnitureCollisionScores(for: entity)
 
             if attemptPlacement(entity, from: originalTransform, at: worldTarget,
                                 originalCollision: originalCollision) {
@@ -2039,11 +2864,11 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         private func attemptPlacement(_ entity: Entity,
                                       from originalTransform: Transform,
                                       at worldTarget: SIMD3<Float>,
-                                      originalCollision: Float) -> Bool {
+                                      originalCollision: [String: Float]) -> Bool {
             entity.transform = originalTransform
             entity.setPosition(worldTarget, relativeTo: nil)
             clampEntityToWalls(entity)
-            let newCollision = furnitureCollisionScore(for: entity)
+            let newCollision = furnitureCollisionScores(for: entity)
             if isAcceptableCollisionChange(from: originalCollision, to: newCollision) {
                 return true
             }
@@ -2051,29 +2876,32 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             return false
         }
 
-        /// 원래 겹치지 않았으면 새 겹침을 금지하고, 서버 결과가 이미 겹쳐 있었다면 겹침이
-        /// 줄어드는 방향만 허용해 사용자가 가구를 밖으로 빼낼 수 있게 한다.
-        private func isAcceptableCollisionChange(from oldScore: Float, to newScore: Float) -> Bool {
-            let epsilon: Float = 0.0001
-            if oldScore <= epsilon { return newScore <= epsilon }
-            return newScore < oldScore - epsilon
+        /// Original chair/table nesting is allowed up to its initial penetration.
+        /// Other overlaps still have to improve, independently for each furniture pair.
+        private func isAcceptableCollisionChange(from oldScores: [String: Float],
+                                                 to newScores: [String: Float]) -> Bool {
+            FurnitureCollisionPolicy.accepts(previous: oldScores, proposed: newScores)
         }
 
-        private func furnitureCollisionScore(for entity: Entity) -> Float {
-            guard let roomAnchor, entity.isEnabled else { return 0 }
-            let collision = collisionFootprintData(for: entity, relativeTo: roomAnchor)
-            var score: Float = 0
-
-            for other in entitiesByIdentifier.values where other !== entity && other.isEnabled {
-                let otherCollision = collisionFootprintData(for: other, relativeTo: roomAnchor)
-                let verticalGap: Float = 0.01
-                guard collision.maxY > otherCollision.minY + verticalGap,
-                      otherCollision.maxY > collision.minY + verticalGap else { continue }
-                if let penetration = footprintPenetration(collision.corners, otherCollision.corners) {
-                    score += penetration
+        private func furnitureCollisionScores(for entity: Entity) -> [String: Float] {
+            guard entity.isEnabled,
+                  let identifier = identifierByEntity[ObjectIdentifier(entity)] else { return [:] }
+            var scores: [String: Float] = [:]
+            for (otherID, other) in entitiesByIdentifier where other !== entity && other.isEnabled {
+                if let penetration = furniturePenetration(entity, other) {
+                    scores[otherID] = collisionPolicy.excess(identifier, otherID, penetration: penetration)
                 }
             }
-            return score
+            return scores
+        }
+
+        private func furniturePenetration(_ first: Entity, _ second: Entity) -> Float? {
+            guard let roomAnchor else { return nil }
+            let a = collisionFootprintData(for: first, relativeTo: roomAnchor)
+            let b = collisionFootprintData(for: second, relativeTo: roomAnchor)
+            let verticalGap: Float = 0.01
+            guard a.maxY > b.minY + verticalGap, b.maxY > a.minY + verticalGap else { return nil }
+            return footprintPenetration(a.corners, b.corners)
         }
 
         private struct CollisionFootprintData {
@@ -2218,6 +3046,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
             return corners
         }
+    }
+}
+
+private extension UIColor {
+    static func voColor(hex: String) -> UIColor? {
+        var value = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6, let number = UInt64(value, radix: 16) else { return nil }
+        return UIColor(
+            red: CGFloat((number >> 16) & 0xFF) / 255,
+            green: CGFloat((number >> 8) & 0xFF) / 255,
+            blue: CGFloat(number & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 

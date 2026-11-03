@@ -108,8 +108,8 @@ struct AssistantPanelView: View {
 
     private var suggestions: some View {
         HStack(spacing: 8) {
-            suggestionChip("소파 140cm 여기 들어갈까?")
-            suggestionChip("책상 한번 없애볼래?")
+            suggestionChip("방을 더 넓게 쓰려면?")
+            suggestionChip("책상 없는 모습 보여줘")
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
@@ -135,7 +135,7 @@ struct AssistantPanelView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField("방에 대해 물어보세요", text: $vm.inputText)
+            TextField("어떻게 바꾸고 싶은지 물어보세요", text: $vm.inputText)
                 .font(.regular13)
                 .focused($inputFocused)
                 .submitLabel(.send)
