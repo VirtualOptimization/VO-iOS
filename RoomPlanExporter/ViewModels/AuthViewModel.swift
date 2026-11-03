@@ -58,7 +58,22 @@ final class AuthViewModel: ObservableObject {
                 username = me.nickname.isEmpty ? me.loginId : me.nickname
                 isLoggedIn = true
             } catch {
-                loginError = (error as? APIError)?.detail ?? "아이디 또는 비밀번호가 올바르지 않아요"
+                if let apiError = error as? APIError {
+                    loginError = apiError.errorDescription
+                } else if let networkError = error as? URLError {
+                    switch networkError.code {
+                    case .timedOut:
+                        loginError = "서버 응답이 늦어지고 있어요. 잠시 후 다시 시도해주세요."
+                    case .notConnectedToInternet, .networkConnectionLost:
+                        loginError = "인터넷 연결을 확인한 뒤 다시 시도해주세요."
+                    default:
+                        loginError = "로그인 서버에 연결하지 못했어요. 잠시 후 다시 시도해주세요."
+                    }
+                } else if error is DecodingError {
+                    loginError = "서버 응답을 처리하지 못했어요. 잠시 후 다시 시도해주세요."
+                } else {
+                    loginError = "로그인 처리 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
+                }
             }
         }
     }

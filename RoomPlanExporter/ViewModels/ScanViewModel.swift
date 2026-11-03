@@ -1,6 +1,15 @@
 import Foundation
 import RoomPlan
 import UIKit
+import UserNotifications
+
+struct OptimizationNotice: Identifiable {
+    let roomId: Int
+    let roomName: String
+    let succeeded: Bool
+
+    var id: String { "\(roomId)-\(succeeded)" }
+}
 
 // MARK: - ScanPhase
 
@@ -53,6 +62,8 @@ final class ScanViewModel: ObservableObject {
     @Published var roomStatus: [Int: MyRoomSummary] = [:]   // roomId -> 서버 버전 상태 (GET /api/rooms)
     /// 서버에서 최적화가 돌고 있는 방 — 앱을 나갔다 들어와도 진행 중임을 보여주기 위해 목록 동기화 때 확인한다.
     @Published var optimizingRoomIds: Set<Int> = []
+    /// 사용자가 최적화 화면을 나간 뒤에도 완료/실패를 놓치지 않도록 전역 알림으로 전달한다.
+    @Published var optimizationNotice: OptimizationNotice? = nil
     /// 최적화 없이 "저장하기"만 눌렀을 때 서버에 확정된 원본 버전 — 채워지면 UploadCompleteView가
     /// 로컬 렌더러 대신 이걸로 서버 색상이 반영된 가구를 보여준다.
     @Published var savedOriginalDetail: RoomVersionDetail? = nil
@@ -84,4 +95,34 @@ final class ScanViewModel: ObservableObject {
 
     func scanCompleted(_ room: CapturedRoom) { phase = .result(room) }
     func retake() { phase = .main }
+
+    func leaveOptimizationScreen() {
+        phase = .main
+        syncRoomsWithServer()
+    }
+
+    func requestOptimizationNotificationPermission() {
+        Task {
+            _ = try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])
+        }
+    }
+
+    func postOptimizationNotification(roomId: Int, succeeded: Bool) {
+        let roomName = savedSpaces.first(where: { $0.roomId == roomId })?.name ?? "내 공간"
+        optimizationNotice = OptimizationNotice(roomId: roomId,
+                                                roomName: roomName,
+                                                succeeded: succeeded)
+
+        let content = UNMutableNotificationContent()
+        content.title = succeeded ? "최적화가 완료됐어요" : "최적화를 완료하지 못했어요"
+        content.body = succeeded
+            ? "\(roomName)의 새로운 배치를 확인해보세요."
+            : "\(roomName)의 최적화를 다시 시도해주세요."
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "optimization-\(roomId)-\(UUID().uuidString)",
+                                            content: content,
+                                            trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
 }

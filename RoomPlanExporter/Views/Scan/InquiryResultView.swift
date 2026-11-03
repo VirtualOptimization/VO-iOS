@@ -40,16 +40,18 @@ struct InquiryResultView: View {
     @State private var mode: ScreenMode = .normal
     @State private var assistantVM: AssistantViewModel?
     @State private var showVersionSheet = false
-    @State private var showActionHints = false
     @StateObject private var editSession = FurnitureEditSession()
     @State private var showNamePrompt = false
     @State private var editName = ""
     @State private var pendingEdits: [FurniturePoseEdit] = []
     @State private var pendingParentVersionId: Int?
     @State private var showRoomActions = false
+    @State private var showsFurnitureNames = false
+    @State private var showsFloorRuler = false
     @State private var showRoomNamePrompt = false
     @State private var roomNameDraft = ""
     @State private var showRoomDeleteAlert = false
+    @State private var showFurnitureScanner = false
 
     private enum ViewerState { case idle, loading, loaded(RoomVersionDetail), error }
     @State private var viewerState: ViewerState = .idle
@@ -70,6 +72,10 @@ struct InquiryResultView: View {
 
     private var isViewingOptimized: Bool {
         selectedVersion?.versionType.uppercased() == "OPTIMIZED"
+    }
+
+    private var isOptimizationRunning: Bool {
+        vm.optimizingRoomIds.contains(detail.roomId)
     }
 
     private var currentRoomName: String {
@@ -152,35 +158,6 @@ struct InquiryResultView: View {
                     .padding(.trailing, 16)
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                if mode == .edit {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        if showActionHints {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("가구를 탭해서 선택 → 오른쪽 핸들을 드래그해서 이동")
-                                Text("다시 탭하면 90도 회전")
-                                Text("다 옮겼으면 오른쪽 위 저장을 눌러주세요")
-                            }
-                            .font(.regular11)
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .voGlassCardWhite(cornerRadius: 14)
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.voBlue, lineWidth: 1.5))
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-                        Button { withAnimation(.easeInOut(duration: 0.15)) { showActionHints.toggle() } } label: {
-                            Image(systemName: "questionmark")
-                                .font(.semiBold12)
-                                .foregroundStyle(Color.voBlue)
-                                .frame(width: 32, height: 32)
-                                .voGlassCircle()
-                        }
-                    }
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 12)
-                }
-            }
             .overlay(alignment: .topLeading) {
                 if mode == .assistant {
                     Button { exitSpecialMode() } label: {
@@ -204,10 +181,12 @@ struct InquiryResultView: View {
 
                 // 3D 뷰를 가리지 않도록 주요 기능만 아래에 가로로 둔다.
                 HStack(spacing: 8) {
-                    toolbarButton("최적화", icon: "sparkles",
-                                  isEnabled: !isViewingOptimized) { optimize() }
+                    toolbarButton(isOptimizationRunning ? "최적화 중" : "최적화", icon: "sparkles",
+                                  isEnabled: !isViewingOptimized && !isOptimizationRunning) { optimize() }
                     toolbarButton("가구 편집", icon: "arrow.up.and.down.and.arrow.left.and.right",
                                   isEnabled: currentDataURL != nil) { mode = .edit }
+                    toolbarButton("가구 추가", icon: "plus.viewfinder",
+                                  isEnabled: isViewerLoaded) { showFurnitureScanner = true }
                     toolbarButton("AI 상담", icon: "bubble.left.and.bubble.right.fill",
                                   isEnabled: currentDataURL != nil) { enterAssistantMode() }
                 }
@@ -288,6 +267,8 @@ struct InquiryResultView: View {
             Text("나중에 버전 목록에서 이 이름으로 찾을 수 있어요.")
         }
         .confirmationDialog("방 관리", isPresented: $showRoomActions, titleVisibility: .visible) {
+            Button(showsFurnitureNames ? "가구 이름 숨기기" : "가구 이름 표시") { showsFurnitureNames.toggle() }
+            Button(showsFloorRuler ? "눈금 숨기기" : "눈금 표시") { showsFloorRuler.toggle() }
             Button("방 이름 수정") { beginRoomRename() }
             Button("방 삭제", role: .destructive) { showRoomDeleteAlert = true }
             Button("취소", role: .cancel) {}
@@ -303,6 +284,15 @@ struct InquiryResultView: View {
         .overlay {
             if showRoomDeleteAlert {
                 roomDeleteConfirmation
+            }
+        }
+        .fullScreenCover(isPresented: $showFurnitureScanner) {
+            LiDARFurnitureScanView { draft in
+                guard editSession.addMeasuredFurniture(draft) else {
+                    vm.editError = "측정한 가구를 방에 추가하지 못했어요. 방을 다시 불러온 뒤 시도해주세요."
+                    return
+                }
+                withAnimation(.easeInOut(duration: 0.2)) { mode = .edit }
             }
         }
     }
@@ -419,6 +409,9 @@ struct InquiryResultView: View {
             }
         case .loaded(let versionDetail):
             FurnitureRealityKitView(detail: versionDetail, isTransparent: true,
+                                    showsRoomGuides: true,
+                                    showsFurnitureNames: showsFurnitureNames,
+                                    showsFloorRuler: showsFloorRuler,
                                     editMode: mode == .edit,
                                     hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [],
                                     editSession: editSession)
@@ -496,8 +489,12 @@ struct InquiryResultView: View {
     // MARK: 화면 모드 전환
 
     private func enterAssistantMode() {
-        guard let currentDataURL else { return }
-        assistantVM = AssistantViewModel(dataURLString: currentDataURL)
+        guard case .loaded(let versionDetail) = viewerState, let currentDataURL else { return }
+        let viewModel = AssistantViewModel(dataURLString: currentDataURL, versionDetail: versionDetail)
+        viewModel.onHiddenFurnitureChange = { identifiers in
+            editSession.setHiddenFurnitureIdentifiers(identifiers)
+        }
+        assistantVM = viewModel
         withAnimation(.easeInOut(duration: 0.2)) { mode = .assistant }
     }
 
@@ -536,10 +533,17 @@ struct InquiryResultView: View {
 
     /// 채팅/가구 편집 모드 둘 다 이 버튼 하나로 나간다.
     private func exitSpecialMode() {
-        assistantVM?.showAllFurniture()
+        let exitingMode = mode
+        if exitingMode == .assistant {
+            assistantVM?.showAllFurniture()
+            // SwiftUI 상태가 사라지기 전에 RealityKit 엔티티도 직접 모두 복원한다.
+            editSession.restoreFurnitureVisibility()
+        } else if exitingMode == .edit {
+            // 저장하지 않고 취소했다면 화면에서 옮긴 위치도 편집 시작 시점으로 되돌린다.
+            editSession.cancelPendingEdits()
+        }
         withAnimation(.easeInOut(duration: 0.2)) { mode = .normal }
         assistantVM = nil
-        showActionHints = false
     }
 
     // MARK: 버전 상세 다운로드 & 캐시

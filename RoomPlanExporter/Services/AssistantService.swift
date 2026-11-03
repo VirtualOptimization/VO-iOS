@@ -70,8 +70,13 @@ actor AssistantService {
 
     static let toolDefinitions: [[String: Any]] = [
         [
+            "name": "review_layout",
+            "description": "현재 보이는 배치의 가구 목록과 문 근처에서 확인할 대상을 살펴본다. 넓게 쓰기·배치 개선·무엇부터 바꿀지 묻는 질문에 먼저 사용한다. 실제 동선이나 문 열림의 안전성을 확정하는 검사는 아니다.",
+            "input_schema": ["type": "object", "properties": [:] as [String: Any]]
+        ],
+        [
             "name": "suggest_placement",
-            "description": "사용자가 방에 넣고 싶어하는 가구의 실제 치수(cm)를 받아, 현재 스캔된 방 안에서 기존 가구와 겹치지 않고 벽 밖으로 나가지 않는 위치를 찾는다. 좌표 계산은 이 tool이 전담하므로 직접 추정하지 말고 반드시 호출한다.",
+            "description": "사용자가 방에 넣고 싶어하는 가구의 실제 치수(cm)를 받아, 현재 보이는 방 배치에서 가로·깊이에 맞는 후보 자리를 근사 계산한다. 가구 회전과 감지된 문 주변을 고려하지만 정확한 설치·통행 보장은 아니다. 두 치수가 없으면 임의로 추정하지 말고 사용자에게 물어본다. 결과는 가구 이름·방 가장자리를 기준으로 설명하고 음수 좌표를 말하지 않는다.",
             "input_schema": [
                 "type": "object",
                 "properties": [
@@ -83,13 +88,21 @@ actor AssistantService {
         ],
         [
             "name": "simulate_without",
-            "description": "방에 있는 특정 가구를 실제로 지우지 않고, 뺐다고 가정했을 때 확보되는 바닥 면적과 방 전체 대비 비율을 계산한다.",
+            "description": "방에 있는 특정 가구를 실제로 삭제하지 않고 화면에서 임시로 숨긴다. 사용자가 '없애봐', '빼볼래', '치워줘', '없는 상태로 보여줘'라고 요청할 때도 반드시 이 tool을 사용한다. 어떤 자리를 비교할 수 있는지와 가구의 바닥 크기를 설명한다. 이 크기를 전부 새로 확보되는 면적이라고 말하지 않는다. 같은 종류가 여러 개면 대상을 먼저 확인한다.",
             "input_schema": [
                 "type": "object",
                 "properties": [
                     "furniture_query": ["type": "string", "description": "제외해볼 가구를 가리키는 한국어 표현. 예: '책상', '침대', '옷장'"]
                 ],
                 "required": ["furniture_query"]
+            ]
+        ],
+        [
+            "name": "restore_all_furniture",
+            "description": "AI 상담 중 임시로 숨긴 가구를 모두 다시 표시한다. 사용자가 '되돌려줘', '다시 보여줘', '취소해줘'라고 요청할 때 사용한다.",
+            "input_schema": [
+                "type": "object",
+                "properties": [:] as [String: Any]
             ]
         ]
     ]

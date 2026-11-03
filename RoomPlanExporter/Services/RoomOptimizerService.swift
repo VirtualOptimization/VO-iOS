@@ -218,6 +218,8 @@ struct UserEditedVersionCreateResponse: Decodable {
 
 /// 버전 상세 응답 (신: layout_json_url / 구: data_url 둘 다 지원)
 struct RoomVersionDetail: Decodable {
+    let roomShellUrl: String?
+    let jsonData: RoomDataPayload?
     let usdzUrl:         String?
     let usdzEmptyUrl:    String?
     let glbUrl:          String?
@@ -236,6 +238,8 @@ struct RoomVersionDetail: Decodable {
     let iosObjects:      [RoomDataPayload.RoomObject]?
 
     enum CodingKeys: String, CodingKey {
+        case roomShellUrl = "room_shell_url"
+        case jsonData = "json_data"
         case usdzUrl       = "usdz_url"
         case usdzEmptyUrl  = "usdz_empty_url"
         case glbUrl        = "glb_url"
@@ -248,12 +252,41 @@ struct RoomVersionDetail: Decodable {
         case iosObjects    = "ios_objects"
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        roomShellUrl = try c.decodeIfPresent(String.self, forKey: .roomShellUrl)
+        // Legacy versions may contain a Unity/raw JSON shape here; their URL remains usable.
+        jsonData = try? c.decode(RoomDataPayload.self, forKey: .jsonData)
+        usdzUrl = try c.decodeIfPresent(String.self, forKey: .usdzUrl)
+        usdzEmptyUrl = try c.decodeIfPresent(String.self, forKey: .usdzEmptyUrl)
+        glbUrl = try c.decodeIfPresent(String.self, forKey: .glbUrl)
+        layoutJsonUrl = try c.decodeIfPresent(String.self, forKey: .layoutJsonUrl)
+        unityJsonUrl = try c.decodeIfPresent(String.self, forKey: .unityJsonUrl)
+        dataUrl = try c.decodeIfPresent(String.self, forKey: .dataUrl)
+        unityDataUrl = try c.decodeIfPresent(String.self, forKey: .unityDataUrl)
+        modelUrls = try c.decodeIfPresent([String: String].self, forKey: .modelUrls)
+        modelUsdzUrls = try c.decodeIfPresent([String: String].self, forKey: .modelUsdzUrls)
+        iosObjects = try c.decodeIfPresent([RoomDataPayload.RoomObject].self, forKey: .iosObjects)
+    }
+
     /// 렌더링에 사용할 iOS JSON URL (신규 우선, 구버전 폴백)
     var effectiveDataUrl: String? { layoutJsonUrl ?? dataUrl }
 
+    /// A saved submission's inline positions must override the starting layout file.
+    func displayPayload(base: RoomDataPayload?, preferInlineObjects: Bool,
+                        structure: RoomDataPayload? = nil) -> RoomDataPayload? {
+        let source = base ?? jsonData
+        let objects = preferInlineObjects ? (iosObjects ?? source?.objects) : (source?.objects ?? iosObjects)
+        guard let objects else { return nil }
+        let room = structure ?? source
+        return RoomDataPayload(objects: objects, walls: room?.walls, floors: room?.floors,
+                               doors: room?.doors, windows: room?.windows)
+    }
+
     /// Match full catalog keys first. A basename fallback is safe only when unique.
     func catalogUSDZURL(modelKey: String?, filename: String?) -> String? {
-        let urls = modelUsdzUrls ?? [:]
+        let fallback = (modelUrls ?? [:]).filter { URL(string: $0.value)?.pathExtension.lowercased() == "usdz" }
+        let urls = fallback.merging(modelUsdzUrls ?? [:], uniquingKeysWith: { _, fresh in fresh })
         if let modelKey, let exact = urls[modelKey], !exact.isEmpty { return exact }
         guard let name = (modelKey ?? filename)?.split(separator: "/").last else { return nil }
         let matches = urls.filter { $0.key.split(separator: "/").last == name && !$0.value.isEmpty }
@@ -262,13 +295,14 @@ struct RoomVersionDetail: Decodable {
 
     /// Recreate the scene when refreshed asset URLs change, even for the same layout.
     var renderingID: String {
-        var parts: [String] = [effectiveDataUrl ?? "", usdzUrl ?? ""]
+        var parts: [String] = [effectiveDataUrl ?? "", usdzUrl ?? "", roomShellUrl ?? ""]
         for (key, value) in (modelUsdzUrls ?? [:]).sorted(by: { $0.key < $1.key }) {
             parts.append(key)
             parts.append(value)
         }
         for object in iosObjects ?? [] {
             parts.append(object.identifier)
+            parts.append(String(describing: object.transform))
             parts.append(object.usdzUrl ?? "")
             parts.append(object.usdcUrl ?? "")
         }
@@ -296,6 +330,8 @@ struct RoomDataPayload: Decodable {
                                       // glb_url은 RealityKit이 못 읽어서(noImporter) 반드시 usdz를 써야 함.
         let center:        [Float]?  // 구 포맷에만 존재
         let dimensions:    [Float]?
+        let displayName:   String?
+        let colorHex:      String?   // LiDAR로 직접 추가한 OBB의 사용자 선택 색상
         let transform:     [[Float]]
 
         init(from decoder: Decoder) throws {
@@ -305,6 +341,11 @@ struct RoomDataPayload: Decodable {
             } else {
                 identifier = try c.decode(String.self, forKey: .id)
             }
+            displayName = (try? c.decode(String.self, forKey: .displayName))
+                .flatMap { value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
             category      = try? c.decode(String.self, forKey: .category)
             modelKey      = try? c.decode(String.self, forKey: .modelKey)
             modelFileName = (try? c.decode(String.self, forKey: .modelFileName)) ?? modelKey
@@ -312,6 +353,8 @@ struct RoomDataPayload: Decodable {
             usdzUrl       = try? c.decode(String.self, forKey: .usdzUrl)
             center        = try? c.decode([Float].self, forKey: .center)
             dimensions    = try? c.decode([Float].self, forKey: .dimensions)
+            colorHex      = (try? c.decode(String.self, forKey: .colorHex))
+                ?? (try? c.decode(String.self, forKey: .displayColor))
 
             // 구: [[Float]] 4x4 행렬 / 신: {rotation:[x,y,z](deg), translation:[x,y,z]}
             if let matrix = try? c.decode([[Float]].self, forKey: .transform) {
@@ -352,6 +395,9 @@ struct RoomDataPayload: Decodable {
             case usdcUrl = "usdc_url"
             case usdzUrl = "usdz_url"
             case center, dimensions, transform
+            case colorHex = "color_hex"
+            case displayColor = "display_color"
+            case displayName = "display_name"
         }
 
         var simdTransform: simd_float4x4? {
