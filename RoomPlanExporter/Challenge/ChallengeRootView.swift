@@ -516,6 +516,7 @@ struct ChallengeRootView: View {
                         },
                         onSceneReady: { vm.sceneLoaded() },
                         onColorLegendReady: { furnitureLegend = $0 },
+                        showsFurnitureNames: true,
                         editMode: !vm.hasPendingSubmission && !vm.isWorking, editSession: editSession
                     )
                     .id(room.detail.renderingID)
@@ -972,7 +973,8 @@ private struct ChallengeLayoutPreview: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.semiBold14)
             FurnitureRealityKitView(detail: detail, referenceDetail: referenceDetail, isTransparent: true,
-                onAssetFailure: { error = $0 }, onSceneReady: { ready = true }, prefersInlineObjects: true)
+                onAssetFailure: { error = $0 }, onSceneReady: { ready = true },
+                showsFurnitureNames: true, prefersInlineObjects: true)
                 .id("\(detail.renderingID)-\(referenceDetail?.renderingID ?? "")-\(retry)")
                 .frame(height: height)
                 .clipShape(RoundedRectangle(cornerRadius: 16))

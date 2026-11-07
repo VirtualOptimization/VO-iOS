@@ -1,6 +1,36 @@
 import Foundation
 import RoomPlan
 
+// No overall deadline: each request stays bounded, while transient failures retry.
+enum OptimizationPolling {
+    static func shouldRetry(_ error: Error) -> Bool {
+        if let error = error as? URLError {
+            return [.timedOut, .networkConnectionLost, .notConnectedToInternet,
+                    .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                    .resourceUnavailable, .internationalRoamingOff, .dataNotAllowed].contains(error.code)
+        }
+        if case OptimizerError.httpError(let status) = error {
+            return [408, 425, 429].contains(status) || (500...599).contains(status)
+        }
+        return false
+    }
+
+    static func wait<Value>(
+        check: () async throws -> Value?,
+        pause: () async throws -> Void = { try await Task.sleep(for: .seconds(5)) }
+    ) async throws -> Value {
+        while true {
+            try Task.checkCancellation()
+            do {
+                if let value = try await check() { return value }
+            } catch {
+                guard shouldRetry(error) else { throw error }
+            }
+            try await pause()
+        }
+    }
+}
+
 // MARK: - 방 스캔 업로드 + 최적화 요청 + 공간 목록
 
 extension ScanViewModel {
@@ -80,23 +110,31 @@ extension ScanViewModel {
 
     /// 파일만 먼저 생기고 OPTIMIZED 버전의 DB 커밋은 뒤늦게 끝날 수 있다. 따라서 상태가
     /// COMPLETED이고 버전 목록에도 OPTIMIZED가 보일 때만 완료로 판단한다.
-    private func pollUntilComplete(roomId: Int, accessToken: String) async throws {
-        let maxAttempts = 1440
-        for attempt in 1...maxAttempts {
-            try await Task.sleep(for: .seconds(5))
-            let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken)
-            if status?.optimizationStatus.uppercased() == "FAILED" {
+    private func pollUntilComplete(roomId: Int,
+                                   recoverStart: (() async throws -> String)? = nil) async throws -> ScanDetail {
+        var pendingStart = recoverStart
+        return try await OptimizationPolling.wait {
+            guard let currentToken = KeychainTokenStore.get(.accessToken) else {
+                throw OptimizerError.httpError(401)
+            }
+            let status = try await optimizer.fetchRoomStatus(roomId: roomId, accessToken: currentToken)
+            if status.optimizationStatus.uppercased() == "NONE", let retryStart = pendingStart {
+                // Retry only after the server confirms no job started, e.g. an offline POST.
+                let restarted = try await retryStart()
+                if restarted.uppercased() == "FAILED" { throw OptimizerError.optimizationFailed }
+                pendingStart = nil
+                return nil
+            }
+            if status.optimizationStatus.uppercased() == "FAILED" {
                 throw OptimizerError.optimizationFailed
             }
-            if status?.optimizationStatus.uppercased() == "COMPLETED",
-               let versions = try? await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken),
-               versions.versions.contains(where: { $0.versionType.uppercased() == "OPTIMIZED" }) {
-                print("✅ 폴링 \(attempt)/\(maxAttempts) – OPTIMIZED 버전 저장까지 완료")
-                return
+            guard status.optimizationStatus.uppercased() == "COMPLETED" else { return nil }
+            let versions = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: currentToken)
+            guard versions.versions.contains(where: { $0.versionType.uppercased() == "OPTIMIZED" }) else {
+                return nil
             }
-            print("⏳ 폴링 \(attempt)/\(maxAttempts) – 최적화 저장 마무리 중")
+            return versions
         }
-        throw OptimizerError.timeout
     }
 
     // MARK: 최적화 요청 (내 방 조회의 "최적화하기" 버튼)
@@ -133,11 +171,17 @@ extension ScanViewModel {
                     phase = .inquiryResult(detail)
                     return
                 }
-                let status = try await start(roomId, accessToken)
-                if status.uppercased() != "COMPLETED" {
-                    try await pollUntilComplete(roomId: roomId, accessToken: accessToken)
+                var recoverStart: (() async throws -> String)?
+                do {
+                    let status = try await start(roomId, accessToken)
+                    if status.uppercased() == "FAILED" { throw OptimizerError.optimizationFailed }
+                } catch {
+                    // A lost POST response does not mean the server stopped. Read its status;
+                    // never submit another optimization blindly.
+                    guard OptimizationPolling.shouldRetry(error) else { throw error }
+                    recoverStart = { try await start(roomId, accessToken) }
                 }
-                let updated = try await optimizer.fetchRoomVersions(roomId: roomId, accessToken: accessToken)
+                let updated = try await pollUntilComplete(roomId: roomId, recoverStart: recoverStart)
                 let isStillWaiting: Bool
                 if case .processing(let visibleRoomId) = phase {
                     isStillWaiting = visibleRoomId == roomId
@@ -151,6 +195,7 @@ extension ScanViewModel {
                 }
                 syncRoomsWithServer()
             } catch {
+                guard !(error is CancellationError), !Task.isCancelled else { return }
                 print("❌ 최적화 실패: \(error)")
                 optimizeError = "최적화에 실패했어요: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
                 if case .processing(let visibleRoomId) = phase, visibleRoomId == roomId {

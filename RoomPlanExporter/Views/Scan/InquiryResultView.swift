@@ -12,6 +12,7 @@ struct InquiryResultView: View {
     init(detail: ScanDetail, focusVersionType: String? = nil, vm: ScanViewModel) {
         self.detail = detail
         self._vm = ObservedObject(wrappedValue: vm)
+        self._wallColorHex = AppStorage(wrappedValue: "17233D", "vo.room.\(detail.roomId).wallColor")
         _selectedVersionKey = State(initialValue: Self.defaultVersionKey(in: detail,
                                                                         focusVersionType: focusVersionType))
     }
@@ -45,6 +46,8 @@ struct InquiryResultView: View {
     @State private var editName = ""
     @State private var pendingEdits: [FurniturePoseEdit] = []
     @State private var pendingParentVersionId: Int?
+    @AppStorage private var wallColorHex: String
+    @State private var showWallColorPicker = false
     @State private var showRoomActions = false
     @State private var showsFurnitureNames = false
     @State private var showsFloorRuler = false
@@ -269,9 +272,39 @@ struct InquiryResultView: View {
         .confirmationDialog("방 관리", isPresented: $showRoomActions, titleVisibility: .visible) {
             Button(showsFurnitureNames ? "가구 이름 숨기기" : "가구 이름 표시") { showsFurnitureNames.toggle() }
             Button(showsFloorRuler ? "눈금 숨기기" : "눈금 표시") { showsFloorRuler.toggle() }
+            Button("벽지 색상 변경") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(200))
+                    showWallColorPicker = true
+                }
+            }
             Button("방 이름 수정") { beginRoomRename() }
             Button("방 삭제", role: .destructive) { showRoomDeleteAlert = true }
             Button("취소", role: .cancel) {}
+        }
+        .sheet(isPresented: $showWallColorPicker) {
+            NavigationStack {
+                Form {
+                    Section {
+                        ColorPicker("벽지 색상", selection: wallColorSelection, supportsOpacity: false)
+                            .font(.regular14)
+                        Button("기본 색상으로 돌아가기") { wallColorHex = "17233D" }
+                            .font(.regular12)
+                            .foregroundStyle(Color.voBlue)
+                    } footer: {
+                        Text("공간 미리보기에 적용되며, 선택한 색상은 이 기기에 저장돼요.")
+                    }
+                }
+                .navigationTitle("벽지 색상")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("완료") { showWallColorPicker = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .alert("방 이름 수정", isPresented: $showRoomNamePrompt) {
             TextField("방 이름", text: $roomNameDraft)
@@ -394,6 +427,22 @@ struct InquiryResultView: View {
         vm.updateSpaceName(trimmed, roomId: detail.roomId)
     }
 
+    private var selectedWallUIColor: UIColor {
+        let value = UInt64(wallColorHex, radix: 16) ?? 0x17233D
+        return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                       green: CGFloat((value >> 8) & 255) / 255,
+                       blue: CGFloat(value & 255) / 255, alpha: 1)
+    }
+
+    private var wallColorSelection: Binding<Color> {
+        Binding(get: { Color(uiColor: selectedWallUIColor) }, set: { color in
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
+            wallColorHex = String(format: "%02X%02X%02X", Int((red * 255).rounded()),
+                                  Int((green * 255).rounded()), Int((blue * 255).rounded()))
+        })
+    }
+
     // MARK: 뷰어 콘텐츠
 
     @ViewBuilder
@@ -410,8 +459,9 @@ struct InquiryResultView: View {
         case .loaded(let versionDetail):
             FurnitureRealityKitView(detail: versionDetail, isTransparent: true,
                                     showsRoomGuides: true,
-                                    showsFurnitureNames: showsFurnitureNames,
+                                    showsFurnitureNames: mode == .assistant || showsFurnitureNames,
                                     showsFloorRuler: showsFloorRuler,
+                                    wallColor: selectedWallUIColor,
                                     editMode: mode == .edit,
                                     hiddenIdentifiers: assistantVM?.hiddenFurnitureIdentifiers ?? [],
                                     editSession: editSession)

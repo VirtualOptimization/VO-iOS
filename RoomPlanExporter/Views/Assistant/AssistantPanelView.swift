@@ -109,7 +109,7 @@ struct AssistantPanelView: View {
     private var suggestions: some View {
         HStack(spacing: 8) {
             suggestionChip("방을 더 넓게 쓰려면?")
-            suggestionChip("책상 없는 모습 보여줘")
+            suggestionChip("침대 없는 모습 보여줘")
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)

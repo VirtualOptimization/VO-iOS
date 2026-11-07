@@ -1394,6 +1394,25 @@ final class FurnitureNudgeHandle: UIView {
 //       가구는 숨긴 뒤, JSON의 최적화된 가구를 오버레이한다.
 // 폴백: capturedRoom이 없으면 JSON 박스 기반 렌더링.
 
+/// RoomPlan floor X defines the initial furniture width direction in the saved room.
+/// The independent LiDAR measurement session's yaw must not be reused in this room.
+enum FurniturePlacementRotation {
+    static func initialOrientation(floorTransform: simd_float4x4?) -> simd_quatf {
+        guard let axis = floorTransform?.columns.0,
+              axis.x.isFinite, axis.z.isFinite,
+              length(SIMD2(axis.x, axis.z)) > 0.0001 else {
+            return simd_quatf(angle: 0, axis: [0, 1, 0])
+        }
+        return simd_quatf(angle: atan2(-axis.z, axis.x), axis: [0, 1, 0])
+    }
+
+    /// The API uses atan2(first-column Z, X), in radians, opposite to quaternion yaw.
+    static func serverYaw(of orientation: simd_quatf) -> Float {
+        let axis = orientation.act(SIMD3<Float>(1, 0, 0))
+        return atan2(axis.z, axis.x)
+    }
+}
+
 /// 편집 모드에서 옮긴 가구의 새 위치·각도 (서버 ios_objects 형식 그대로)
 struct FurniturePoseEdit: Encodable {
     let identifier: String
@@ -1524,6 +1543,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         // 씬 빌드 (비동기) – coordinator 전달로 카메라 거리 조정 가능
         let coord = context.coordinator
+        coord.setWallColor(wallColor.withAlphaComponent(isTransparent ? 0.58 : wallColor.cgColor.alpha))
         coord.setEditMode(editMode)
         editSession?.collect = { [weak coord] in coord?.collectPoseEdits() ?? [] }
         editSession?.cancel = { [weak coord] in coord?.resetFurnitureToBaseline() }
@@ -1569,7 +1589,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         arView.addGestureRecognizer(tapGesture)
 
         // 가구 편집 도구 — 방과 가구를 가리지 않도록 선택됐을 때 화면 아래 중앙에 나타난다.
-        if showsRoomGuides {
+        if showsRoomGuides || showsFurnitureNames || showsFloorRuler {
             let overlay = RoomGuideOverlay()
             overlay.showsNames = showsFurnitureNames
             overlay.showsRuler = showsFloorRuler
@@ -1597,6 +1617,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
     func updateUIView(_ uiView: ARView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.setWallColor(wallColor.withAlphaComponent(isTransparent ? 0.58 : wallColor.cgColor.alpha))
         if coordinator.guideOverlay?.showsNames != showsFurnitureNames {
             coordinator.guideOverlay?.showsNames = showsFurnitureNames
         }
@@ -1621,6 +1642,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         coordinator.identifierByEntity.removeAll()
         coordinator.poseBaseline.removeAll()
         coordinator.newFurnitureIdentifiers.removeAll()
+        coordinator.wallSurfaces.removeAll()
         coordinator.arView = nil
     }
 
@@ -1643,7 +1665,10 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 let openings = capturedRoomOpenings(wall: wall, doors: room.doors, windows: room.windows)
                 wallSegments(wallTransform: wall.transform, wallW: wall.dimensions.x, wallH: wall.dimensions.y,
                              openings: openings, color: effectiveWallColor, depth: 0.04)
-                    .forEach { anchor.addChild($0) }
+                    .forEach {
+                        anchor.addChild($0)
+                        coordinator.registerWall($0)
+                    }
             }
             for floor in room.floors {
                 anchor.addChild(makeCapturedSurface(floor, color: floorColor, depth: 0.025))
@@ -1708,6 +1733,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     }
                 }
                 anchor.addChild(shell)
+                func registerImportedWalls(_ node: Entity, isWall: Bool = false) {
+                    let name = node.name.lowercased()
+                    let wall = !name.contains("floor") && (isWall || name.contains("wall"))
+                    if wall, node is ModelEntity {
+                        if #available(iOS 18.0, *), isTransparent {
+                            coordinator.registerWall(node, opacityFromParent: true)
+                        } else {
+                            coordinator.registerWall(node)
+                        }
+                        return
+                    }
+                    for child in node.children { registerImportedWalls(child, isWall: wall) }
+                }
+                registerImportedWalls(shell)
                 shellBounds = shell.visualBounds(relativeTo: anchor)
             } catch { onAssetFailure?("방 구조를 불러오지 못했어요. 다시 불러와 주세요.") }
         }
@@ -1751,7 +1790,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
             for wall in payload.walls ?? [] {
                 guard let wallT = wall.simdTransform else {
-                    anchor.addChild(makeSurfaceBox(surface: wall, color: effectiveWallColor, depth: 0.12))
+                    let surface = makeSurfaceBox(surface: wall, color: effectiveWallColor, depth: 0.12)
+                    anchor.addChild(surface)
+                    coordinator.registerWall(surface)
                     continue
                 }
                 let wallW = wall.dimensions.count > 0 ? wall.dimensions[0] : 1.0
@@ -1760,7 +1801,10 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                                                doors: payload.doors ?? [], windows: payload.windows ?? [])
                 wallSegments(wallTransform: wallT, wallW: wallW, wallH: wallH,
                              openings: openings, color: effectiveWallColor, depth: 0.12)
-                    .forEach { anchor.addChild($0) }
+                    .forEach {
+                        anchor.addChild($0)
+                        coordinator.registerWall($0)
+                    }
             }
             for floor in payload.floors ?? [] {
                 anchor.addChild(makeSurfaceBox(surface: floor, color: floorColor, depth: 0.025))
@@ -2232,6 +2276,24 @@ struct FurnitureRealityKitView: UIViewRepresentable {
         var camera: PerspectiveCamera?          // 카메라 거리 동적 조정용
         let orbitCamera = RoomOrbitCamera()
         private(set) var editMode: Bool = false
+        var wallSurfaces: [(entity: Entity, opacityFromParent: Bool)] = []
+        private var currentWallColor: UIColor?
+
+        func registerWall(_ entity: Entity, opacityFromParent: Bool = false) {
+            wallSurfaces.append((entity, opacityFromParent))
+            if let color = currentWallColor {
+                applyTint(to: entity, color: opacityFromParent ? color.withAlphaComponent(1) : color)
+            }
+        }
+
+        func setWallColor(_ color: UIColor) {
+            guard currentWallColor?.isEqual(color) != true else { return }
+            currentWallColor = color
+            for surface in wallSurfaces {
+                applyTint(to: surface.entity, color: surface.opacityFromParent ? color.withAlphaComponent(1) : color)
+            }
+        }
+
         var defaultCameraDistance: Float = 6
         var sceneTask: Task<Void, Never>?
         /// identifier → 배치된 엔티티. AI 배치 상담의 가구 제외 시뮬레이션이 이걸로 보이기/숨기기 전환
@@ -2274,8 +2336,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
 
         /// 서버 JSON의 회전 표기(transform 첫 열이 [cos, 0, sin])에 맞춘 yaw 값
         static func serverYaw(of orientation: simd_quatf) -> Float {
-            let axis = orientation.act(SIMD3<Float>(1, 0, 0))
-            return atan2(axis.z, axis.x)
+            FurniturePlacementRotation.serverYaw(of: orientation)
         }
 
         /// 처음 위치·각도에서 실제로 바뀐 가구만 서버 형식으로 뽑아낸다.
@@ -2352,6 +2413,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                 mesh: .generateBox(size: draft.dimensions, cornerRadius: 0.035),
                 materials: [material]
             )
+            entity.orientation = FurniturePlacementRotation.initialOrientation(floorTransform: floorTransform)
             entity.name = "furniture_\(draft.id)"
             entity.generateCollisionShapes(recursive: true)
             roomAnchor.addChild(entity)
@@ -2365,7 +2427,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             poseBaseline[draft.id] = PoseBaseline(
                 centerOffset: .zero,
                 center: provisionalCenter,
-                yaw: 0,
+                yaw: Self.serverYaw(of: entity.orientation),
                 transform: entity.transform,
                 dimensions: draft.dimensions,
                 isNew: true,
@@ -2413,7 +2475,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             poseBaseline[draft.id] = PoseBaseline(
                 centerOffset: .zero,
                 center: chosen,
-                yaw: 0,
+                yaw: Self.serverYaw(of: entity.orientation),
                 transform: entity.transform,
                 dimensions: draft.dimensions,
                 isNew: true,

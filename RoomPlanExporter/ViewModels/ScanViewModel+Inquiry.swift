@@ -20,7 +20,7 @@ extension ScanViewModel {
                 let hasOptimized = detail.versions.contains { $0.versionType.uppercased() == "OPTIMIZED" }
                 let status = try? await optimizer.fetchRoomStatus(roomId: roomId, accessToken: accessToken)
                 if !hasOptimized, status?.optimizationStatus.uppercased() == "PROCESSING" {
-                    if isOptimizing || optimizingRoomIds.contains(roomId) {
+                    if isOptimizing {
                         // 이 앱에서 이미 기다리는 Task가 있다면 중복 폴링하지 않고 원본 방을 보여준다.
                         // 완료 시 전역 알림이 도착한다.
                         phase = .inquiryResult(detail)

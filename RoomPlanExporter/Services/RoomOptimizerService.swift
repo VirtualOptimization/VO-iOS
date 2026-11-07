@@ -521,15 +521,50 @@ actor RoomOptimizerService {
         throw lastError
     }
 
+    /// Refresh an expired token during long waits; bound individual requests, not the job.
+    private func optimizationData(for request: URLRequest) async throws -> Data {
+        var request = request
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let token = KeychainTokenStore.get(.accessToken) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        for attempt in 0...1 {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw OptimizerError.invalidResponse }
+            if http.statusCode == 401, attempt == 0,
+               let refreshToken = KeychainTokenStore.get(.refreshToken) {
+                struct RefreshRequest: Encodable { let refresh_token: String }
+                struct RefreshResponse: Decodable { let access_token: String }
+                var refresh = URLRequest(url: URL(string: "\(APIConfig.baseURL)/auth/refresh")!)
+                refresh.httpMethod = "POST"
+                refresh.timeoutInterval = 30
+                refresh.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                refresh.httpBody = try JSONEncoder().encode(RefreshRequest(refresh_token: refreshToken))
+                let (refreshData, refreshResponse) = try await URLSession.shared.data(for: refresh)
+                guard let refreshedHTTP = refreshResponse as? HTTPURLResponse else { throw OptimizerError.invalidResponse }
+                guard (200...299).contains(refreshedHTTP.statusCode) else {
+                    throw OptimizerError.httpError(refreshedHTTP.statusCode)
+                }
+                let token = try JSONDecoder().decode(RefreshResponse.self, from: refreshData).access_token
+                // A logout/account switch while this request was in flight must stay logged out.
+                guard KeychainTokenStore.get(.refreshToken) == refreshToken else { throw OptimizerError.httpError(401) }
+                KeychainTokenStore.set(token, for: .accessToken)
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                continue
+            }
+            guard (200...299).contains(http.statusCode) else { throw OptimizerError.httpError(http.statusCode) }
+            return data
+        }
+        throw OptimizerError.httpError(401)
+    }
+
     // MARK: 🔍 룸 상태 조회 (최적화 완료 폴링)
 
     func fetchRoomStatus(roomId: Int, accessToken: String) async throws -> RoomStatusResponse {
         var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)")!)
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw OptimizerError.serverError
-        }
+        let data = try await optimizationData(for: req)
         return try JSONDecoder().decode(RoomStatusResponse.self, from: data)
     }
 
@@ -542,11 +577,7 @@ actor RoomOptimizerService {
         var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/optimize")!)
         req.httpMethod = "POST"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            print("❌ 최적화 시작 응답: \(String(data: data, encoding: .utf8) ?? "")")
-            throw OptimizerError.serverError
-        }
+        let data = try await optimizationData(for: req)
         return try JSONDecoder().decode(OptimizeStartResponse.self, from: data).optimizationStatus
     }
 
@@ -572,12 +603,7 @@ actor RoomOptimizerService {
     func fetchRoomVersions(roomId: Int, accessToken: String) async throws -> ScanDetail {
         var req = URLRequest(url: URL(string: "\(roomsBase)/\(roomId)/versions")!)
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            print("❌ 버전 목록 응답: \(String(data: data, encoding: .utf8) ?? "")")
-            throw OptimizerError.serverError
-        }
-        print("📋 버전 목록 원본: \(String(data: data, encoding: .utf8) ?? "")")
+        let data = try await optimizationData(for: req)
         return try JSONDecoder().decode(ScanDetail.self, from: data)
     }
 
@@ -726,14 +752,17 @@ actor RoomOptimizerService {
 enum OptimizerError: LocalizedError {
     case serverError
     case invalidResponse
-    case timeout
+    case httpError(Int)
     case optimizationFailed
 
     var errorDescription: String? {
         switch self {
         case .serverError:     return "서버 오류가 발생했습니다"
         case .invalidResponse: return "응답 형식이 올바르지 않습니다"
-        case .timeout:         return "최적화 시간이 초과되었습니다"
+        case .httpError(401): return "로그인이 만료됐어요. 다시 로그인해주세요."
+        case .httpError(403): return "이 방을 조회할 권한이 없어요."
+        case .httpError(404): return "방을 찾을 수 없어요."
+        case .httpError: return "서버에 연결하지 못했어요."
         case .optimizationFailed: return "서버에서 최적화에 실패했습니다"
         }
     }
