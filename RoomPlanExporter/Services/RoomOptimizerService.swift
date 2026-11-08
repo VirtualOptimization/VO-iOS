@@ -305,8 +305,43 @@ struct RoomVersionDetail: Decodable {
             parts.append(String(describing: object.transform))
             parts.append(object.usdzUrl ?? "")
             parts.append(object.usdcUrl ?? "")
+            parts.append(object.colorHex ?? "")
+            parts.append(object.displayColorHex ?? "")
+            parts.append(object.source ?? "")
         }
         return parts.joined(separator: "|")
+    }
+}
+
+/// Saved placeholder colors are shared with the server; catalog materials remain authored.
+enum FurnitureDisplayColor {
+    static func normalizedHex(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count == 7, text.first == "#",
+              text.dropFirst().allSatisfy({ "0123456789abcdefABCDEF".contains($0) }) else { return nil }
+        return text.uppercased()
+    }
+
+    static func defaultHex(category: String?) -> String {
+        switch category?.lowercased() {
+        case "bed": return "#F2CCD4"
+        case "sofa", "chair": return "#B8D4E6"
+        case "table", "desk": return "#E0D1B8"
+        case "storage": return "#C7D1C2"
+        case "television": return "#8C8C94"
+        case "refrigerator": return "#E0E6EB"
+        case "washerdryer": return "#D1E0EB"
+        default: return "#CCC7BF"
+        }
+    }
+
+    static func resolvedHex(for object: RoomDataPayload.RoomObject,
+                            fresh: RoomDataPayload.RoomObject? = nil) -> String {
+        // Explicit user choice must win over a generated category/display color.
+        [fresh?.colorHex, object.colorHex, fresh?.displayColorHex, object.displayColorHex]
+            .compactMap { normalizedHex($0) }.first
+            ?? defaultHex(category: fresh?.category ?? object.category)
     }
 }
 
@@ -331,6 +366,8 @@ struct RoomDataPayload: Decodable {
         let center:        [Float]?  // 구 포맷에만 존재
         let dimensions:    [Float]?
         let displayName:   String?
+        let displayColorHex: String?
+        let source: String?
         let colorHex:      String?   // LiDAR로 직접 추가한 OBB의 사용자 선택 색상
         let transform:     [[Float]]
 
@@ -346,6 +383,8 @@ struct RoomDataPayload: Decodable {
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     return trimmed.isEmpty ? nil : trimmed
                 }
+            displayColorHex = try? c.decode(String.self, forKey: .displayColorHex)
+            source = try? c.decode(String.self, forKey: .source)
             category      = try? c.decode(String.self, forKey: .category)
             modelKey      = try? c.decode(String.self, forKey: .modelKey)
             modelFileName = (try? c.decode(String.self, forKey: .modelFileName)) ?? modelKey
@@ -397,7 +436,14 @@ struct RoomDataPayload: Decodable {
             case center, dimensions, transform
             case colorHex = "color_hex"
             case displayColor = "display_color"
+            case displayColorHex = "display_color_hex"
+            case source
             case displayName = "display_name"
+        }
+
+        /// Measured boxes must not be replaced by a catalog mesh after saving.
+        var isMeasuredFurniture: Bool {
+            source?.lowercased() == "lidar_obb" || identifier.lowercased().hasPrefix("lidar_")
         }
 
         var simdTransform: simd_float4x4? {

@@ -914,17 +914,7 @@ struct RealityKitRoomView: UIViewRepresentable {
     // MARK: - 카테고리별 색상
 
     private func colorForCategory(_ category: CapturedRoom.Object.Category) -> UIColor {
-        switch category {
-        case .chair:        return UIColor(red: 0.72, green: 0.83, blue: 0.90, alpha: 1.0)
-        case .sofa:         return UIColor(red: 0.72, green: 0.83, blue: 0.90, alpha: 1.0)
-        case .table:        return UIColor(red: 0.88, green: 0.82, blue: 0.72, alpha: 1.0)
-        case .bed:          return UIColor(red: 0.95, green: 0.80, blue: 0.83, alpha: 1.0)
-        case .storage:      return UIColor(red: 0.78, green: 0.82, blue: 0.76, alpha: 1.0)
-        case .television:   return UIColor(red: 0.55, green: 0.55, blue: 0.58, alpha: 1.0)
-        case .refrigerator: return UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
-        case .washerDryer:  return UIColor(red: 0.82, green: 0.88, blue: 0.92, alpha: 1.0)
-        default:            return UIColor(red: 0.80, green: 0.78, blue: 0.75, alpha: 1.0)
-        }
+        UIColor.voColor(hex: FurnitureDisplayColor.defaultHex(category: String(describing: category))) ?? .systemGray
     }
 
     // MARK: - Coordinator
@@ -1836,9 +1826,20 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             guard let matrix = obj.simdTransform else { continue }
             let worldPos = SIMD3<Float>(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
             let freshObj = freshObjectsById[obj.identifier.lowercased()]
+            let placeholderHex = FurnitureDisplayColor.resolvedHex(for: obj, fresh: freshObj)
+            let placeholderColor = UIColor.voColor(hex: placeholderHex) ?? colorForCategory(obj.category ?? "")
+            let isMeasured = obj.isMeasuredFurniture || freshObj?.isMeasuredFurniture == true
 
             var placed = false
             var placedEntity: Entity? = nil
+
+            if isMeasured {
+                let box = makeFallbackBox(for: obj, color: placeholderColor, isMeasured: true)
+                box.transform = Transform(matrix: matrix)
+                anchor.addChild(box)
+                placedEntity = box
+                placed = true
+            }
 
             // Prefer colored USDZ, then legacy USDC. Preserve authored materials.
             let candidates: [(String?, String)] = [
@@ -1898,7 +1899,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     if let furnitureTint {
                         applyTint(to: loaded, color: furnitureTint)
                     } else {
-                        applyPreviewColor(to: loaded, color: colorForCategory(obj.category ?? ""))
+                        applyPreviewColor(to: loaded, color: placeholderColor)
                     }
                     anchor.addChild(loaded)
                     placed = true
@@ -1915,7 +1916,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             // 카테고리 색상 OBB로는 항상 표시해야 방 전체 미리보기가 빈 자리 없이 완성된다.
             if !placed {
                 print("  📦 \(obj.category ?? ""): 박스 폴백")
-                let box = makeFallbackBox(for: obj)
+                let box = makeFallbackBox(for: obj, color: placeholderColor, isMeasured: false)
                 box.transform = Transform(matrix: matrix)
                 anchor.addChild(box)
                 placedEntity = box
@@ -1949,7 +1950,7 @@ struct FurnitureRealityKitView: UIViewRepresentable {
                     transform: placedEntity.transform,
                     dimensions: collisionDimensions,
                     isNew: false,
-                    colorHex: obj.colorHex,
+                    colorHex: freshObj?.colorHex ?? obj.colorHex,
                     category: obj.category,
                     displayName: obj.displayName
                 )
@@ -2237,36 +2238,19 @@ struct FurnitureRealityKitView: UIViewRepresentable {
     }
 
     /// 카테고리별 색상 박스 (배경색과 겹치지 않는 뚜렷한 색상). furnitureTint 있으면 그걸로 통일.
-    private func makeFallbackBox(for obj: RoomDataPayload.RoomObject) -> ModelEntity {
-        var mat = SimpleMaterial()
-        let savedColor = obj.colorHex.flatMap(UIColor.voColor(hex:))
-        mat.color = .init(tint: furnitureTint ?? savedColor ?? colorForCategory(obj.category ?? ""))
-        mat.roughness = 0.9
+    private func makeFallbackBox(for obj: RoomDataPayload.RoomObject, color: UIColor,
+                                 isMeasured: Bool) -> ModelEntity {
         let raw = obj.dimensions ?? []
         let dims = (0..<3).map { index -> Float in
             guard raw.indices.contains(index), raw[index].isFinite, raw[index] > 0 else { return 0.5 }
             return raw[index]
         }
-        return ModelEntity(
-            mesh: .generateBox(
-                size: SIMD3(dims[0], dims[1], dims[2]),
-                cornerRadius: 0.03
-            ),
-            materials: [mat]
-        )
+        return makeFurniturePlaceholder(dimensions: SIMD3(dims[0], dims[1], dims[2]),
+                                        color: furnitureTint ?? color, isMeasured: isMeasured)
     }
 
     private func colorForCategory(_ category: String) -> UIColor {
-        switch category.lowercased() {
-        case "bed":          return UIColor(red: 0.95, green: 0.80, blue: 0.83, alpha: 1.0)
-        case "sofa", "chair": return UIColor(red: 0.72, green: 0.83, blue: 0.90, alpha: 1.0)
-        case "table":        return UIColor(red: 0.88, green: 0.82, blue: 0.72, alpha: 1.0)
-        case "storage":      return UIColor(red: 0.78, green: 0.82, blue: 0.76, alpha: 1.0)
-        case "television":   return UIColor(red: 0.55, green: 0.55, blue: 0.58, alpha: 1.0)
-        case "refrigerator": return UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
-        case "washerdryer":  return UIColor(red: 0.82, green: 0.88, blue: 0.92, alpha: 1.0)
-        default:             return UIColor(red: 0.80, green: 0.78, blue: 0.75, alpha: 1.0)
-        }
+        UIColor.voColor(hex: FurnitureDisplayColor.defaultHex(category: category)) ?? .systemGray
     }
 
     // MARK: Coordinator
@@ -2406,13 +2390,9 @@ struct FurnitureRealityKitView: UIViewRepresentable {
             }
 
             deselect()
-            var material = SimpleMaterial()
-            material.color = .init(tint: UIColor.voColor(hex: draft.colorHex) ?? .systemBrown)
-            material.roughness = 0.88
-            let entity = ModelEntity(
-                mesh: .generateBox(size: draft.dimensions, cornerRadius: 0.035),
-                materials: [material]
-            )
+            let entity = makeFurniturePlaceholder(dimensions: draft.dimensions,
+                                                  color: UIColor.voColor(hex: draft.colorHex) ?? .systemBrown,
+                                                  isMeasured: true)
             entity.orientation = FurniturePlacementRotation.initialOrientation(floorTransform: floorTransform)
             entity.name = "furniture_\(draft.id)"
             entity.generateCollisionShapes(recursive: true)
@@ -3259,6 +3239,17 @@ private func wallBox(lx: Float, ly: Float, w: Float, h: Float,
 }
 
 // MARK: - 머티리얼 헬퍼
+
+/// One factory for the unsaved measured object and its saved placeholder.
+fileprivate func makeFurniturePlaceholder(dimensions: SIMD3<Float>, color: UIColor,
+                                         isMeasured: Bool) -> ModelEntity {
+    var material = SimpleMaterial()
+    material.color = .init(tint: color)
+    material.roughness = isMeasured ? 0.88 : 0.9
+    material.metallic = 0
+    return ModelEntity(mesh: .generateBox(size: dimensions, cornerRadius: isMeasured ? 0.035 : 0.03),
+                       materials: [material])
+}
 
 /// Only tint untextured white placeholder materials. Authored colors/textures survive.
 fileprivate func applyPreviewColor(to entity: Entity, color: UIColor) {
